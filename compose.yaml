@@ -1,0 +1,55 @@
+x-worker: &worker
+  build: .
+  command: ["python", "-m", "app.worker"]
+  restart: unless-stopped
+  depends_on:
+    redis:
+      condition: service_healthy
+  environment: &worker-environment
+    REDIS_URL: redis://redis:6379/0
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - broker-data:/data
+
+  controller:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+
+  worker-1:
+    <<: *worker
+    environment:
+      <<: *worker-environment
+      WORKER_ID: worker-1
+
+  worker-2:
+    <<: *worker
+    environment:
+      <<: *worker-environment
+      WORKER_ID: worker-2
+
+  worker-3:
+    <<: *worker
+    environment:
+      <<: *worker-environment
+      WORKER_ID: worker-3
+
+volumes:
+  broker-data:
+
