@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Stratos Field Notes — Distributed Systems Lab</title>
+  <link rel="stylesheet" href="/lab.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="wordmark" href="/">STRATOS <span>/ FIELD NOTES</span></a>
+    <div class="edition">EXPERIMENT SERIES · 01</div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="kicker">A working notebook for unreliable machines</p>
+      <h1>Systems fail in the<br><em>space between events.</em></h1>
+      <p class="lede">Run controlled failures against real workers. Read the evidence. Form a theory. Change the candidate only when you can defend the tradeoff.</p>
+      <div class="principle"><span>RULE 01</span> The lab reports what happened. It will not tell you what to build.</div>
+    </section>
+
+    <div class="layout">
+      <aside>
+        <div class="section-label">Playable studies</div>
+        <nav id="challenge-nav" aria-label="Challenges"></nav>
+        <a class="back-link" href="/">← Return to task monitor</a>
+      </aside>
+
+      <section class="workbench">
+        <div id="challenge-copy" class="challenge-copy"></div>
+
+        <div class="run-controls">
+          <div class="segmented" role="group" aria-label="Implementation">
+            <button data-implementation="baseline" class="selected">Broken baseline</button>
+            <button data-implementation="candidate">Your candidate</button>
+          </div>
+          <button id="run-button" class="run-button">Run experiment <span>→</span></button>
+          <button id="cancel-button" class="cancel-button" hidden>Cancel</button>
+        </div>
+
+        <section id="experiment" class="experiment" aria-live="polite">
+          <div class="experiment-header">
+            <div><span class="section-label">Live apparatus</span><h2 id="phase">Awaiting experiment</h2></div>
+            <div id="run-state" class="run-state idle"><i></i><span>Idle</span></div>
+          </div>
+
+          <div id="workers" class="workers"></div>
+
+          <div class="evidence-grid">
+            <section class="panel">
+              <div class="panel-heading"><h3>Event ledger</h3><span id="event-count">00 entries</span></div>
+              <ol id="timeline" class="timeline"><li class="empty">Run the experiment to open the ledger.</li></ol>
+            </section>
+            <section class="panel">
+              <div class="panel-heading"><h3>Measured invariants</h3><span>Evidence, not advice</span></div>
+              <div id="invariants" class="invariants"><p class="empty">Evaluation appears when the run concludes.</p></div>
+            </section>
+          </div>
+
+          <div id="metrics" class="metrics"></div>
+          <div id="verdict" class="verdict" hidden></div>
+        </section>
+      </section>
+    </div>
+
+    <section class="archive">
+      <div class="archive-heading"><span class="section-label">Future case files</span><h2>The failure archive</h2><p>Researched problems waiting to become controlled experiments.</p></div>
+      <div id="roadmap" class="roadmap"></div>
+    </section>
+  </main>
+
+  <footer><span>STRATOS LEARNING LAB</span><span>Observe · Hypothesize · Test</span></footer>
+  <script src="/lab.js" defer></script>
+</body>
+</html>

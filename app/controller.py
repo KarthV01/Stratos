@@ -13,6 +13,7 @@ from redis.asyncio import Redis
 
 from app.broker import ensure_worker_group, redis_client
 from app.config import EVENT_STREAM, TASK_INDEX, TASK_STREAM
+from app.lab_runtime import router as lab_router
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -48,11 +49,27 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Distributed Task Starter", lifespan=lifespan)
+app.include_router(lab_router)
 
 
 @app.get("/", include_in_schema=False)
 async def dashboard() -> FileResponse:
     return FileResponse(BASE_DIR / "static" / "index.html")
+
+
+@app.get("/lab", include_in_schema=False)
+async def learning_lab() -> FileResponse:
+    return FileResponse(BASE_DIR / "static" / "lab.html")
+
+
+@app.get("/lab.css", include_in_schema=False)
+async def learning_lab_css() -> FileResponse:
+    return FileResponse(BASE_DIR / "static" / "lab.css", media_type="text/css")
+
+
+@app.get("/lab.js", include_in_schema=False)
+async def learning_lab_js() -> FileResponse:
+    return FileResponse(BASE_DIR / "static" / "lab.js", media_type="text/javascript")
 
 
 @app.get("/health")

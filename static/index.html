@@ -9,6 +9,7 @@
     body { margin: 0; background: #0b1020; color: #e9eefc; }
     main { width: min(1050px, calc(100% - 32px)); margin: 48px auto; }
     header { display: flex; justify-content: space-between; align-items: end; gap: 20px; }
+    nav { display: flex; gap: 16px; align-items: center; } a { color: #b9c7e8; text-decoration: none; }
     h1 { margin: 0; font-size: clamp(28px, 5vw, 48px); }
     .subtle { color: #8fa0c5; }
     form { display: grid; grid-template-columns: 1fr 110px 100px; gap: 10px; margin: 28px 0; }
@@ -26,7 +27,7 @@
 </head>
 <body>
   <main>
-    <header><div><h1>Stratos</h1><div class="subtle">distributed task monitor</div></div><div id="connection" class="subtle">connecting…</div></header>
+    <header><div><h1>Stratos</h1><div class="subtle">distributed task monitor</div></div><nav><a href="/lab">Learning lab →</a><div id="connection" class="subtle">connecting…</div></nav></header>
     <form id="form">
       <input id="message" required maxlength="10000" placeholder="Give the workers something to do" value="Hello, distributed world!">
       <input id="delay" type="number" min="0" max="30" step="0.5" value="2" title="Simulated seconds">
@@ -64,4 +65,3 @@
   </script>
 </body>
 </html>
-

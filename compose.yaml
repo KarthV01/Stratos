@@ -50,6 +50,26 @@ services:
       <<: *worker-environment
       WORKER_ID: worker-3
 
+  lab-worker-1:
+    <<: *worker
+    command: ["python", "-m", "app.lab_worker"]
+    environment:
+      <<: *worker-environment
+      WORKER_ID: lab-worker-1
+
+  lab-worker-2:
+    <<: *worker
+    command: ["python", "-m", "app.lab_worker"]
+    environment:
+      <<: *worker-environment
+      WORKER_ID: lab-worker-2
+
+  lab-worker-3:
+    <<: *worker
+    command: ["python", "-m", "app.lab_worker"]
+    environment:
+      <<: *worker-environment
+      WORKER_ID: lab-worker-3
+
 volumes:
   broker-data:
-
