@@ -32,6 +32,7 @@ ACTIVE_RUN_KEY = "lab:active-run"
 RUN_HISTORY_KEY = "lab:run-history"
 RUN_TTL = 86_400
 RUN_TASKS: dict[str, asyncio.Task[None]] = {}
+RUN_DELIVERIES: dict[str, list[tuple[str, str]]] = {}
 
 
 class RunRequest(BaseModel):
@@ -136,9 +137,11 @@ async def enqueue(
         "behavior": behavior,
         **{key: str(value) for key, value in fields.items()},
     }
-    return await redis.xadd(
+    entry_id = await redis.xadd(
         worker_stream(worker_id), payload, maxlen=5_000, approximate=True
     )
+    RUN_DELIVERIES.setdefault(run_id, []).append((worker_id, entry_id))
+    return entry_id
 
 
 async def run_retention(redis: Redis, run_id: str, implementation: str) -> None:
@@ -339,8 +342,12 @@ async def execute_run(redis: Redis, run_id: str, challenge_id: str, implementati
         await set_run_fields(redis, run_id, status="error", phase="Runtime error", finished_at=time.time())
         await emit_event(redis, run_id, "runtime-error", type(exc).__name__)
     finally:
+        if await redis.exists(f"lab:run:{run_id}:cancelled"):
+            for worker_id, entry_id in RUN_DELIVERIES.get(run_id, []):
+                await redis.xack(worker_stream(worker_id), LAB_GROUP, entry_id)
         if await redis.get(ACTIVE_RUN_KEY) == run_id:
             await redis.delete(ACTIVE_RUN_KEY)
+        RUN_DELIVERIES.pop(run_id, None)
         RUN_TASKS.pop(run_id, None)
 
 
