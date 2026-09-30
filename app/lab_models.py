@@ -1,130 +1,262 @@
-from copy import deepcopy
 from typing import Any
 
-from app.challenges import quiet_worker, retention
+
+def study(
+    study_id: str,
+    title: str,
+    category: str,
+    difficulty: str,
+    summary: str,
+    problem: str,
+    guarantee: str,
+    safeguards: list[str],
+    steps: list[tuple[str, str, str, str]],
+) -> dict[str, Any]:
+    return {
+        "id": study_id,
+        "title": title,
+        "category": category,
+        "difficulty": difficulty,
+        "summary": summary,
+        "problem": problem,
+        "guarantee": guarantee,
+        "safeguards": safeguards,
+        "steps": [
+            {"from": source, "to": target, "tone": tone, "message": message}
+            for source, target, tone, message in steps
+        ],
+    }
 
 
 CHALLENGES: list[dict[str, Any]] = [
-    {
-        "id": "vanishing-receipt",
-        "title": "The Vanishing Receipt",
-        "eyebrow": "Retention / Idempotency",
-        "difficulty": "Intermediate",
-        "playable": True,
-        "summary": "A completed job returns after the system has forgotten completing it.",
-        "brief": (
-            "A worker applies a non-idempotent ledger change, but its acknowledgement "
-            "is delayed. The short-lived completion receipt expires before the job is "
-            "retried. At the same time, old task and event records accumulate forever."
-        ),
-        "objective": (
-            "Keep enough history to prevent a valid retry from repeating the effect, "
-            "while bounding data that is no longer needed for retry or audit."
-        ),
-        "requirements": [
-            "Each unique task changes the ledger exactly once.",
-            "Accepted work reaches a terminal state within the retry window.",
-            "Recent results remain available for the audit window.",
-            "Old task, event, receipt, and pending state stays bounded.",
+    study(
+        "vanishing-receipt", "The Vanishing Receipt", "Delivery & memory", "Intermediate",
+        "The work finished, but the proof disappeared before the retry arrived.",
+        "Worker A changes the ledger and then loses its acknowledgement. The broker gives the same task to Worker B after the completion receipt has expired, so the external effect happens twice.",
+        "A retry may repeat computation, but it must not repeat the business effect. Memory stays bounded without forgetting tasks that can still return.",
+        [
+            "Give every task a stable idempotency key supplied by the caller.",
+            "Store the key atomically with the business effect, not in a separate best-effort cache.",
+            "Retain deduplication records longer than the maximum delivery and audit window.",
+            "Expire payloads, event history, and dedupe receipts on separate policies.",
         ],
-        "scope": [
-            "A task can be processed before its acknowledgement is recorded.",
-            "Retry eligibility and memory retention are two different clocks.",
-            "The broker, task history, event log, and completion receipts all retain state.",
+        [
+            ("Broker", "Worker A", "normal", "Give task T-1042"),
+            ("Worker A", "Ledger", "normal", "Apply +$20 once"),
+            ("Worker A", "Broker", "failure", "Acknowledgement is lost"),
+            ("Broker", "Worker B", "warning", "Retry task T-1042"),
+            ("Worker B", "Dedupe store", "protected", "Atomic key already exists"),
+            ("Dedupe store", "Ledger", "protected", "Suppress the second effect"),
         ],
-    },
-    {
-        "id": "quiet-worker",
-        "title": "The Quiet Worker",
-        "eyebrow": "Failure Detection / Ownership",
-        "difficulty": "Advanced",
-        "playable": True,
-        "summary": "A silent worker may be dead—or may still be changing the world.",
-        "brief": (
-            "One worker stops communicating during a long task but keeps executing. "
-            "The controller reassigns its work. Later, a different worker genuinely "
-            "dies, so waiting forever is not safe either."
-        ),
-        "objective": (
-            "Recover work from dead workers without allowing an old, merely silent "
-            "owner to publish a second or stale result."
-        ),
-        "requirements": [
-            "Work owned by a dead worker is recovered before the liveness deadline.",
-            "An obsolete owner cannot commit after ownership changes.",
-            "Only one authoritative side effect is accepted per task.",
-            "No task remains indefinitely pending.",
+    ),
+    study(
+        "quiet-worker", "The Quiet Worker", "Failure detection", "Advanced",
+        "Silence cannot tell you whether a worker is dead or still changing the world.",
+        "Worker A stops sending heartbeats but continues computing. The controller reassigns its task to Worker B. Without ownership fencing, A can return later and overwrite B's accepted result.",
+        "Dead work is recovered promptly, while a stale owner can finish computation but cannot publish an authoritative result.",
+        [
+            "Treat heartbeat timeouts as suspicion, not proof of death.",
+            "Issue a monotonically increasing fencing token whenever ownership changes.",
+            "Require the result store to reject commits carrying an older token.",
+            "Make the accepted commit idempotent and reclaim the old pending delivery.",
         ],
-        "scope": [
-            "Silence is an observation, not proof of death.",
-            "Ownership can change while earlier computation continues.",
-            "Detection, reassignment, and acceptance of a result are separate decisions.",
-            "Define the timing assumptions your design depends on.",
+        [
+            ("Worker A", "Controller", "failure", "Heartbeats stop; execution continues"),
+            ("Controller", "Worker B", "warning", "Reassign with ownership token 2"),
+            ("Worker B", "Result store", "protected", "Commit result with token 2"),
+            ("Worker A", "Result store", "failure", "Late commit arrives with token 1"),
+            ("Result store", "Worker A", "protected", "Reject stale owner"),
         ],
-    },
+    ),
+    study(
+        "retry-avalanche", "Retry Avalanche", "Retries & load", "Intermediate",
+        "A small outage becomes a large outage when every client retries together.",
+        "Requests time out against a strained dependency. Immediate synchronized retries multiply the load, consume the recovery capacity, and cause another wave of timeouts.",
+        "Retries improve recovery from transient faults without becoming an unbounded source of traffic.",
+        [
+            "Retry only errors that are likely to be transient.",
+            "Use exponential backoff with full jitter so callers spread out.",
+            "Enforce per-request retry limits and a service-wide retry budget.",
+            "Honor deadlines so obsolete work is not retried after its caller has left.",
+        ],
+        [
+            ("Clients", "Dependency", "failure", "First wave times out"),
+            ("Clients", "Dependency", "failure", "Immediate retries synchronize"),
+            ("Dependency", "Clients", "warning", "Recovery capacity is exhausted"),
+            ("Retry budget", "Clients", "protected", "Limit attempts; add backoff + jitter"),
+            ("Clients", "Dependency", "protected", "Sparse retry traffic succeeds"),
+        ],
+    ),
+    study(
+        "poison-letter", "Poison Letter", "Retries & isolation", "Intermediate",
+        "One task can fail forever and consume every retry the queue can provide.",
+        "A malformed or permanently invalid message is returned to the head of the queue after every failure. Healthy work waits while workers repeatedly rediscover the same permanent error.",
+        "Transient failures are retried, permanent failures are isolated, and healthy tasks keep moving.",
+        [
+            "Classify permanent validation failures separately from transient infrastructure errors.",
+            "Record an attempt count and cap automatic delivery attempts.",
+            "Move exhausted messages to a dead-letter queue with their failure context.",
+            "Alert on dead-letter growth and provide an explicit replay path after repair.",
+        ],
+        [
+            ("Broker", "Worker", "normal", "Give malformed task"),
+            ("Worker", "Broker", "failure", "Permanent validation failure"),
+            ("Broker", "Worker", "warning", "Retry count reaches limit"),
+            ("Worker", "Dead-letter queue", "protected", "Quarantine with error context"),
+            ("Broker", "Worker", "protected", "Give next healthy task"),
+        ],
+    ),
+    study(
+        "infinite-waiting-room", "The Queue That Ate the Machine", "Backpressure", "Intermediate",
+        "A queue hides overload until memory and waiting time become the outage.",
+        "Producers submit work faster than workers can complete it. An unbounded queue accepts everything, grows indefinitely, and turns useful requests into stale requests that consume memory.",
+        "The system stays responsive under overload by bounding waiting work and rejecting or degrading early.",
+        [
+            "Set queue capacity from measured throughput and an explicit latency budget.",
+            "Reject excess work at admission with a retry-after signal instead of silently queuing it.",
+            "Propagate deadlines and discard work that can no longer benefit its caller.",
+            "Use load shedding, priority classes, or cheaper degraded work before saturation.",
+        ],
+        [
+            ("Producers", "Queue", "normal", "Arrival rate exceeds service rate"),
+            ("Queue", "Memory", "failure", "Backlog grows without a limit"),
+            ("Queue", "Workers", "warning", "Tasks expire before execution"),
+            ("Admission gate", "Producers", "protected", "Reject above bounded capacity"),
+            ("Queue", "Workers", "protected", "Remaining work meets its deadline"),
+        ],
+    ),
+    study(
+        "time-traveler", "Time Traveler", "Ordering & state", "Intermediate",
+        "An older computation arrives last and replaces newer truth.",
+        "Version 2 takes longer than version 3. When both workers write unconditionally, the late version 2 result wins even though it was computed from older input.",
+        "Results may finish out of order, but state only moves forward according to a logical version.",
+        [
+            "Attach a monotonic version, sequence, or compare-and-swap revision to work.",
+            "Make the state store conditionally accept only the expected or newer version.",
+            "Avoid wall-clock timestamps as the sole ordering authority across machines.",
+            "Partition ordered work by entity when operations cannot safely commute.",
+        ],
+        [
+            ("Controller", "Worker A", "normal", "Give account version 2"),
+            ("Controller", "Worker B", "normal", "Give account version 3"),
+            ("Worker B", "State store", "protected", "Commit version 3"),
+            ("Worker A", "State store", "failure", "Late version 2 arrives"),
+            ("State store", "Worker A", "protected", "Conditional write rejects version 2"),
+        ],
+    ),
+    study(
+        "two-commits", "Two Commits, One Truth", "Atomicity", "Advanced",
+        "A database update succeeds, then the process dies before publishing its event.",
+        "Business state and broker publication are two separate commits. A crash between them leaves the database saying the order exists while every downstream service waits for an event that never arrives.",
+        "The business update and the intent to publish become durable together, without requiring a distributed transaction.",
+        [
+            "Write the business change and an outbox row in one local database transaction.",
+            "Use a separate relay to publish unsent outbox rows to the broker.",
+            "Mark delivery progress idempotently; assume the relay may publish twice.",
+            "Make downstream consumers idempotent using the event's stable ID.",
+        ],
+        [
+            ("API", "Database", "normal", "Commit order + outbox row atomically"),
+            ("Process", "Broker", "failure", "Process crashes before direct publish"),
+            ("Outbox relay", "Database", "protected", "Read durable unsent row"),
+            ("Outbox relay", "Broker", "protected", "Publish event with stable ID"),
+            ("Consumer", "Dedupe store", "protected", "Suppress relay duplicates"),
+        ],
+    ),
+    study(
+        "noisy-neighbor", "Noisy Neighbor", "Fairness", "Intermediate",
+        "One tenant fills the shared queue and quietly steals everyone else's latency.",
+        "Tenant A submits a burst large enough to occupy the queue and every worker. A tiny task from Tenant B waits behind thousands of unrelated jobs even though the system is technically healthy.",
+        "Shared capacity remains efficient while every tenant receives a bounded, observable share of service.",
+        [
+            "Separate admission limits and in-flight quotas by tenant or workload class.",
+            "Schedule with weighted fair queues instead of a single global FIFO.",
+            "Reserve minimum capacity for critical traffic and cap burst borrowing.",
+            "Measure queue delay and rejection rate per tenant, not only globally.",
+        ],
+        [
+            ("Tenant A", "Shared queue", "failure", "Submit a 5,000-task burst"),
+            ("Tenant B", "Shared queue", "warning", "Small task waits behind the burst"),
+            ("Admission", "Tenant A", "protected", "Apply tenant burst quota"),
+            ("Fair scheduler", "Workers", "protected", "Interleave weighted tenant queues"),
+            ("Workers", "Tenant B", "protected", "Bounded latency result"),
+        ],
+    ),
+    study(
+        "rolling-restart", "Rolling Restart Trap", "Lifecycle", "Intermediate",
+        "A healthy deployment can duplicate or abandon every task it interrupts.",
+        "An orchestrator terminates workers while they hold tasks. If they acknowledge early, unfinished work is lost. If they vanish after the effect but before acknowledgement, replacements repeat it.",
+        "Deployments stop accepting new work, drain bounded in-flight work, and safely recover anything that exceeds the grace period.",
+        [
+            "On shutdown, mark the worker draining before it receives new tasks.",
+            "Allow in-flight work to finish within a configured termination grace period.",
+            "Acknowledge only after durable effects and make those effects idempotent.",
+            "Reclaim deliveries whose workers exceed the grace period, with ownership fencing.",
+        ],
+        [
+            ("Orchestrator", "Worker A", "warning", "Send termination signal"),
+            ("Worker A", "Broker", "failure", "Abrupt exit would strand the claimed task"),
+            ("Worker A", "Broker", "protected", "Stop taking new tasks"),
+            ("Worker A", "Result store", "normal", "Finish current durable effect"),
+            ("Worker A", "Broker", "protected", "Acknowledge, then exit"),
+            ("Broker", "Worker B", "protected", "Reclaim only work past grace period"),
+        ],
+    ),
+    study(
+        "split-brain", "Split-Brain Foreman", "Coordination", "Advanced",
+        "A network partition lets two coordinators both call themselves leader.",
+        "The old leader cannot reach its peers but can still reach storage. A new leader is elected on the majority side. Without fencing, both issue valid-looking writes concurrently.",
+        "Only a quorum-backed leadership term can authorize a write, and external resources reject commands from older terms.",
+        [
+            "Require a majority quorum to elect or renew leadership.",
+            "Attach the monotonically increasing election term as a fencing token.",
+            "Make protected resources reject operations from any older term.",
+            "Prefer loss of availability on the minority side over conflicting writes.",
+        ],
+        [
+            ("Network", "Leader 1", "failure", "Partition isolates the old leader"),
+            ("Quorum", "Leader 2", "protected", "Elect term 8 on majority side"),
+            ("Leader 2", "Storage", "protected", "Write with term 8"),
+            ("Leader 1", "Storage", "failure", "Write arrives with term 7"),
+            ("Storage", "Leader 1", "protected", "Reject the fenced leader"),
+        ],
+    ),
+    study(
+        "clockwork-liar", "Clockwork Liar", "Time", "Advanced",
+        "Wall clocks jump, drift, and disagree—yet leases and deadlines often trust them.",
+        "A clock correction moves one worker forward and makes its lease appear expired. Another worker takes ownership while the first still believes time remains, creating overlapping authority.",
+        "Elapsed-time decisions use monotonic time, while cross-node ordering uses logical versions or a service with explicit clock uncertainty.",
+        [
+            "Measure local durations with a monotonic clock, not calendar time.",
+            "Represent deadlines as durations propagated from the caller where possible.",
+            "Use logical clocks, revisions, or consensus terms for cross-node ordering.",
+            "Combine every lease with fencing; synchronized clocks alone do not stop stale writes.",
+        ],
+        [
+            ("Clock service", "Worker A", "failure", "Wall clock jumps forward"),
+            ("Controller", "Worker B", "warning", "Lease appears expired"),
+            ("Worker A", "Storage", "failure", "Old owner continues writing"),
+            ("Monotonic timer", "Controller", "protected", "Measure elapsed lease duration"),
+            ("Storage", "Worker A", "protected", "Reject stale fencing token"),
+        ],
+    ),
+    study(
+        "herd-at-dawn", "Herd at Dawn", "Caching", "Intermediate",
+        "A popular cache key expires and every request rebuilds it at once.",
+        "Thousands of callers observe the same cache miss. They simultaneously query the backing service, overwhelming the dependency precisely when the cache was meant to protect it.",
+        "One caller refreshes a value while others receive bounded stale data or share the same in-flight result.",
+        [
+            "Collapse concurrent misses with a per-key single-flight operation.",
+            "Serve stale-while-revalidate data when the domain permits it.",
+            "Add jitter to expirations so popular keys do not roll over together.",
+            "Bound refresh concurrency and use backoff when the origin is unhealthy.",
+        ],
+        [
+            ("Requests", "Cache", "normal", "Popular key expires"),
+            ("Requests", "Origin", "failure", "Every miss starts a rebuild"),
+            ("Single-flight gate", "Requests", "protected", "Choose one refresher per key"),
+            ("Cache", "Requests", "protected", "Serve bounded stale value to waiters"),
+            ("Refresher", "Cache", "protected", "Publish one fresh value with jittered TTL"),
+        ],
+    ),
 ]
-
-ROADMAP = [
-    ("retry-avalanche", "Retry Avalanche", "Intermediate", "Timeouts amplify load through correlated retries, missing budgets, and absent jitter."),
-    ("poison-letter", "Poison Letter", "Intermediate", "One permanently bad message monopolizes workers and starves healthy work."),
-    ("infinite-waiting-room", "The Queue That Ate the Machine", "Intermediate", "Producers outrun consumers until latency and retained memory become the failure."),
-    ("time-traveler", "Time Traveler", "Intermediate", "Late results and clock-skewed timestamps overwrite newer state."),
-    ("two-commits", "Two Commits, One Truth", "Advanced", "A database write and broker publish disagree across a crash boundary."),
-    ("noisy-neighbor", "Noisy Neighbor", "Intermediate", "One tenant or hot partition consumes shared capacity and blocks everyone else."),
-    ("rolling-restart", "Rolling Restart Trap", "Intermediate", "Shutdown and deployment churn abandon in-flight work or process it twice."),
-    ("split-brain", "Split-Brain Foreman", "Advanced", "Two coordinators both believe they own the same decisions during a partition."),
-    ("clockwork-liar", "Clockwork Liar", "Advanced", "Clock jumps corrupt leases, deadlines, expiry, and apparent event order."),
-    ("herd-at-dawn", "Herd at Dawn", "Intermediate", "Synchronized cache expiry sends every requester to the same recovering dependency."),
-]
-
-for challenge_id, title, difficulty, summary in ROADMAP:
-    CHALLENGES.append(
-        {
-            "id": challenge_id,
-            "title": title,
-            "eyebrow": "Upcoming experiment",
-            "difficulty": difficulty,
-            "playable": False,
-            "summary": summary,
-            "brief": summary,
-            "objective": "A future deterministic experiment will make this failure observable.",
-            "requirements": [],
-            "scope": [],
-        }
-    )
-
-
-def get_challenge(challenge_id: str) -> dict[str, Any] | None:
-    return next((item for item in CHALLENGES if item["id"] == challenge_id), None)
-
-
-def strategy_for(challenge_id: str, implementation: str) -> dict[str, Any]:
-    strategies = {
-        "vanishing-receipt": retention,
-        "quiet-worker": quiet_worker,
-    }
-    module = strategies[challenge_id]
-    return deepcopy(module.BASELINE if implementation == "baseline" else module.CANDIDATE)
-
-
-def retention_invariants(metrics: dict[str, int]) -> list[dict[str, Any]]:
-    return [
-        invariant("exactly-once-effect", "One effect per unique task", metrics.get("effect_count") == 1, f"observed {metrics.get('effect_count', 0)} ledger writes for 1 task"),
-        invariant("terminal-progress", "Accepted work reaches a terminal state", metrics.get("completed") == 1, f"{metrics.get('completed', 0)} task reached completion"),
-        invariant("recent-audit", "Recent result remains inspectable", metrics.get("recent_result_visible") == 1, "result record is available" if metrics.get("recent_result_visible") == 1 else "result record is missing"),
-        invariant("bounded-retention", "Expired records are bounded", metrics.get("retained_records", 0) <= 500, f"{metrics.get('retained_records', 0)} old records remain; budget is 500"),
-        invariant("pending-drained", "Expired pending work is resolved", metrics.get("pending_count", 0) == 0, f"{metrics.get('pending_count', 0)} broker entries remain pending"),
-    ]
-
-
-def quiet_worker_invariants(metrics: dict[str, int]) -> list[dict[str, Any]]:
-    return [
-        invariant("dead-worker-recovery", "Dead-worker task is recovered", metrics.get("dead_task_completed") == 1, f"completed={metrics.get('dead_task_completed', 0)}"),
-        invariant("single-authority", "One authoritative effect per task", metrics.get("quiet_effect_count") == 1, f"observed {metrics.get('quiet_effect_count', 0)} effects for the quiet-worker task"),
-        invariant("stale-owner-rejected", "Obsolete owner cannot replace the result", metrics.get("result_generation") == 2, f"accepted ownership generation {metrics.get('result_generation', 0)}; expected 2"),
-        invariant("pending-drained", "Recovered sources leave no pending work", metrics.get("pending_count", 0) == 0, f"{metrics.get('pending_count', 0)} broker entries remain pending"),
-    ]
-
-
-def invariant(invariant_id: str, label: str, passed: bool, evidence: str) -> dict[str, Any]:
-    return {"id": invariant_id, "label": label, "passed": passed, "evidence": evidence}

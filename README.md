@@ -8,17 +8,14 @@ A FastAPI controller accepts tasks and exposes their state. Redis Streams acts a
 
 The work handler is deliberately isolated from queue coordination. Today it can process demonstration jobs; the same boundary can be replaced with an AI agent, document processor, automation step, or other long-running operation while preserving the surrounding task lifecycle and observability.
 
-## Distributed-systems lab
+## Distributed-systems field guide
 
-Stratos also includes an isolated learning lab for testing failure modes without interfering with normal tasks. It focuses on two problems that simple queue demos often omit:
+Stratos includes a read-only field guide at `/lab`. Twelve scrolling demonstrations trace a message through the normal handoff, the failure, and the safeguards that should be coded into the system. Topics include duplicate effects, silent workers, retry storms, poison messages, overload, stale writes, dual writes, tenant fairness, rolling restarts, split brain, clock errors, and cache stampedes.
 
-- duplicate effects when work succeeds but its acknowledgement is lost; and
-- recovery when a worker dies or becomes unreachable while holding a task.
-
-Each study can replay a preserved broken baseline and evaluate an evolving candidate strategy against deterministic invariants. Timelines and measurements show what occurred, while the lab leaves the repair itself to the developer. Dedicated workers and Redis keys keep these experiments separate from the main queue.
+The guide uses a simple model: systems give work and take reports back. Reliability depends on making delivery, ownership, time, and authoritative truth explicit at every boundary. It teaches containment and prevention patterns rather than asking the reader to repair a live exercise.
 
 ## Project goal and boundaries
 
-The goal is to make the mechanics of at-least-once delivery, idempotency, acknowledgements, heartbeats, ownership, and stale-work recovery concrete enough to observe and modify. Stratos is both a usable starter and a teaching tool: small enough to read end to end, but complete enough to expose failures that matter in production systems.
+The goal is to make the mechanics of at-least-once delivery, idempotency, acknowledgements, heartbeats, ownership, and stale-work recovery concrete enough to observe. Stratos is both a usable starter and a teaching tool: small enough to read end to end, but complete enough to explain failures that matter in production systems.
 
 It is not presented as a production-ready orchestration platform. A real deployment would still need authentication, authorization, task timeouts, retry and dead-letter policies, stale-message claiming, retention controls, metrics, and capacity planning. The repository establishes the execution model on which those guarantees—or an agent platform with those guarantees—can be built.

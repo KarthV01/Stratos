@@ -3,65 +3,74 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Stratos Task Monitor</title>
-  <style>
-    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-    body { margin: 0; background: #0b1020; color: #e9eefc; }
-    main { width: min(1050px, calc(100% - 32px)); margin: 48px auto; }
-    header { display: flex; justify-content: space-between; align-items: end; gap: 20px; }
-    nav { display: flex; gap: 16px; align-items: center; } a { color: #b9c7e8; text-decoration: none; }
-    h1 { margin: 0; font-size: clamp(28px, 5vw, 48px); }
-    .subtle { color: #8fa0c5; }
-    form { display: grid; grid-template-columns: 1fr 110px 100px; gap: 10px; margin: 28px 0; }
-    input, button { border: 1px solid #293654; border-radius: 10px; padding: 12px; font: inherit; }
-    input { background: #111a30; color: #fff; }
-    button { background: #6d5efc; color: white; font-weight: 700; cursor: pointer; }
-    #tasks { display: grid; gap: 10px; }
-    article { background: #111a30; border: 1px solid #202c49; border-radius: 12px; padding: 16px; display: grid; grid-template-columns: 120px 1fr auto; gap: 14px; align-items: center; }
-    .status { width: fit-content; border-radius: 999px; padding: 5px 9px; font-size: 12px; font-weight: 800; text-transform: uppercase; }
-    .queued { background: #3a4358; } .running { background: #735c17; color: #ffe899; }
-    .completed { background: #164d3a; color: #8af0c4; } .failed { background: #652b39; color: #ffc1cf; }
-    code { color: #a9b9dd; } .worker { text-align: right; }
-    @media (max-width: 700px) { form { grid-template-columns: 1fr 90px; } form button { grid-column: 1 / -1; } article { grid-template-columns: 1fr; } .worker { text-align: left; } }
-  </style>
+  <meta name="color-scheme" content="dark">
+  <title>Stratos — Distributed Task Monitor</title>
+  <link rel="stylesheet" href="/stratos.css">
 </head>
 <body>
-  <main>
-    <header><div><h1>Stratos</h1><div class="subtle">distributed task monitor</div></div><nav><a href="/lab">Learning lab →</a><div id="connection" class="subtle">connecting…</div></nav></header>
-    <form id="form">
-      <input id="message" required maxlength="10000" placeholder="Give the workers something to do" value="Hello, distributed world!">
-      <input id="delay" type="number" min="0" max="30" step="0.5" value="2" title="Simulated seconds">
-      <button>Queue task</button>
-    </form>
-    <section id="tasks"><div class="subtle">No tasks yet.</div></section>
+  <header class="site-header">
+    <a class="wordmark" href="/">STRATOS <span>/ TASK SYSTEM</span></a>
+    <nav class="site-nav" aria-label="Primary navigation">
+      <span class="header-note">CONTROLLER · BROKER · 3 WORKERS</span>
+      <a href="/" aria-current="page">Monitor</a>
+      <a href="/lab">Field guide →</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    <section class="monitor-hero">
+      <div>
+        <p class="kicker">Distributed work, made visible</p>
+        <h1>Give work.<br><em>Take results.</em></h1>
+        <p class="lede">The controller gives durable tasks to a shared broker. Available workers take them, perform the work, and report what happened. Every interesting failure lives somewhere between those handoffs.</p>
+      </div>
+      <aside class="system-thesis">
+        <strong>Give ↔ Take</strong>
+        <p>A queue is a promise about ownership, delivery, memory, and time—not just a list. Watch those promises move through this small system.</p>
+        <div id="connection" class="live-pill"><i></i><span>Connecting</span></div>
+      </aside>
+    </section>
+
+    <section class="topology" aria-label="System topology">
+      <div class="topology-head"><h2>Running topology</h2><span>One broker · competing consumers</span></div>
+      <div class="topology-flow">
+        <div class="topology-node"><span>01 / Accept</span><strong>Controller API</strong></div>
+        <div class="flow-line"></div>
+        <div class="topology-node"><span>02 / Hold</span><strong>Redis Streams</strong></div>
+        <div class="flow-line"></div>
+        <div class="worker-stack">
+          <div class="topology-node"><span>03A / Take</span><strong>Worker 1</strong><i class="worker-dot"></i></div>
+          <div class="topology-node"><span>03B / Take</span><strong>Worker 2</strong><i class="worker-dot"></i></div>
+          <div class="topology-node"><span>03C / Take</span><strong>Worker 3</strong><i class="worker-dot"></i></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <div class="composer">
+        <span class="section-label">Give the system work</span>
+        <h2>Queue a task</h2>
+        <p>The delay simulates time spent inside a future agent or job handler.</p>
+        <form id="form" class="task-form">
+          <div class="field"><label for="message">Task message</label><input id="message" required maxlength="10000" value="Hello, distributed world!" placeholder="Describe the work"></div>
+          <div class="form-row">
+            <div class="field"><label for="delay">Work time</label><input id="delay" type="number" min="0" max="30" step="0.5" value="2"></div>
+            <button class="submit-task" type="submit">Give task →</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="task-log">
+        <div class="task-log-head">
+          <div><span class="section-label">Take the result</span><h2>Task ledger</h2></div>
+          <div id="task-counts" class="task-counts"></div>
+        </div>
+        <section id="tasks" class="tasks"><div class="empty-state">No tasks have crossed the broker yet.</div></section>
+      </div>
+    </section>
   </main>
-  <script>
-    const tasks = document.querySelector('#tasks');
-    const escapeHtml = value => String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-    async function refresh() {
-      const response = await fetch('/api/tasks');
-      const data = await response.json();
-      tasks.innerHTML = data.length ? data.map(task => `
-        <article>
-          <span class="status ${task.status}">${escapeHtml(task.status)}</span>
-          <div><div>${escapeHtml(task.payload.message)}</div><small><code>${task.id.slice(0, 8)}</code>${task.result ? ` · ${escapeHtml(task.result.reply)}` : task.error ? ` · ${escapeHtml(task.error)}` : ''}</small></div>
-          <div class="worker subtle">${escapeHtml(task.worker || 'unassigned')}</div>
-        </article>`).join('') : '<div class="subtle">No tasks yet.</div>';
-    }
-    document.querySelector('#form').addEventListener('submit', async event => {
-      event.preventDefault();
-      const button = event.target.querySelector('button');
-      button.disabled = true;
-      try {
-        await fetch('/api/tasks', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({message: document.querySelector('#message').value, delay_seconds: Number(document.querySelector('#delay').value)})});
-        await refresh();
-      } finally { button.disabled = false; }
-    });
-    const source = new EventSource('/api/events');
-    source.onopen = () => document.querySelector('#connection').textContent = '● live';
-    source.onerror = () => document.querySelector('#connection').textContent = 'reconnecting…';
-    source.onmessage = refresh;
-    refresh();
-  </script>
+
+  <footer class="site-footer"><span>STRATOS / DISTRIBUTED TASK SYSTEM</span><span>GIVE · TAKE · REPORT</span></footer>
+  <script src="/monitor.js" defer></script>
 </body>
 </html>

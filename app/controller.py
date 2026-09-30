@@ -72,6 +72,16 @@ async def learning_lab_js() -> FileResponse:
     return FileResponse(BASE_DIR / "static" / "lab.js", media_type="text/javascript")
 
 
+@app.get("/stratos.css", include_in_schema=False)
+async def shared_styles() -> FileResponse:
+    return FileResponse(BASE_DIR / "static" / "stratos.css", media_type="text/css")
+
+
+@app.get("/monitor.js", include_in_schema=False)
+async def monitor_script() -> FileResponse:
+    return FileResponse(BASE_DIR / "static" / "monitor.js", media_type="text/javascript")
+
+
 @app.get("/health")
 async def health(request: Request) -> dict[str, str]:
     await request.app.state.redis.ping()
