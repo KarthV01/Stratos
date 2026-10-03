@@ -1,21 +1,43 @@
 # Stratos
 
-Stratos is a compact distributed task system and learning environment for exploring how reliable background work is coordinated across multiple workers. It provides the foundation of an agent runtime—task submission, durable delivery, worker competition, progress reporting, and recovery experiments—without hiding the distributed-systems behavior behind a large framework.
+Stratos is a small distributed task system for learning and building the backend mechanics of reliable background work.
 
-## What the system does
+## Current architecture
 
-A FastAPI controller accepts tasks and exposes their state. Redis Streams acts as the durable broker, and multiple workers compete for work so each task is claimed by one consumer. A browser dashboard receives live updates through server-sent events, making the lifecycle from queued to running to completed or failed visible as it happens. Redis persistence keeps task and broker state across ordinary service restarts.
+- A FastAPI controller accepts tasks and exposes task state.
+- Redis Streams provides durable task delivery and a shared consumer group.
+- Three worker containers compete for tasks.
+- Workers report queued, running, completed, and failed lifecycle events.
+- Redis append-only persistence retains broker and task state across ordinary restarts.
 
-The work handler is deliberately isolated from queue coordination. Today it can process demonstration jobs; the same boundary can be replaced with an AI agent, document processor, automation step, or other long-running operation while preserving the surrounding task lifecycle and observability.
+The task handler in `app/handler.py` is intentionally small. It is the boundary where real work—an agent invocation, document processor, automation step, or other long-running operation—can replace the demonstration delay.
 
-## Distributed-systems field guide
+## Run locally
 
-Stratos includes a read-only field guide at `/lab`. Twelve scrolling demonstrations trace a message through the normal handoff, the failure, and the safeguards that should be coded into the system. Topics include duplicate effects, silent workers, retry storms, poison messages, overload, stale writes, dual writes, tenant fairness, rolling restarts, split brain, clock errors, and cache stampedes.
+```sh
+docker compose up --build
+```
 
-The guide uses a simple model: systems give work and take reports back. Reliability depends on making delivery, ownership, time, and authoritative truth explicit at every boundary. It teaches containment and prevention patterns rather than asking the reader to repair a live exercise.
+The API is available at `http://localhost:8000`; interactive OpenAPI documentation is at `http://localhost:8000/docs`.
 
-## Project goal and boundaries
+Example task submission:
 
-The goal is to make the mechanics of at-least-once delivery, idempotency, acknowledgements, heartbeats, ownership, and stale-work recovery concrete enough to observe. Stratos is both a usable starter and a teaching tool: small enough to read end to end, but complete enough to explain failures that matter in production systems.
+```sh
+curl -X POST http://localhost:8000/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"message":"hello","delay_seconds":2}'
+```
 
-It is not presented as a production-ready orchestration platform. A real deployment would still need authentication, authorization, task timeouts, retry and dead-letter policies, stale-message claiming, retention controls, metrics, and capacity planning. The repository establishes the execution model on which those guarantees—or an agent platform with those guarantees—can be built.
+List recent tasks:
+
+```sh
+curl http://localhost:8000/api/tasks
+```
+
+## Backend roadmap
+
+This is not production-ready yet. Important next steps include idempotent effects, task timeouts, bounded retries, dead-letter handling, stale-message claiming, graceful worker shutdown, authentication and authorization, retention controls, metrics, and capacity planning.
+
+Docker and Compose are configured. Kubernetes manifests have not been added yet.
+
+The removed frontend's visual system is recorded in `docs/frontend-layout-reference.md` for future reuse without keeping frontend runtime code in this backend repository.

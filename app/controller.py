@@ -2,20 +2,16 @@ import asyncio
 import json
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, AsyncIterator
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 
 from app.broker import ensure_worker_group, redis_client
 from app.config import EVENT_STREAM, TASK_INDEX, TASK_STREAM
-from app.lab_runtime import router as lab_router
-
-BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class TaskRequest(BaseModel):
@@ -48,38 +44,17 @@ async def lifespan(app: FastAPI):
     await redis.aclose()
 
 
-app = FastAPI(title="Distributed Task Starter", lifespan=lifespan)
-app.include_router(lab_router)
+app = FastAPI(title="Stratos Task API", lifespan=lifespan)
 
 
 @app.get("/", include_in_schema=False)
-async def dashboard() -> FileResponse:
-    return FileResponse(BASE_DIR / "static" / "index.html")
-
-
-@app.get("/lab", include_in_schema=False)
-async def learning_lab() -> FileResponse:
-    return FileResponse(BASE_DIR / "static" / "lab.html")
-
-
-@app.get("/lab.css", include_in_schema=False)
-async def learning_lab_css() -> FileResponse:
-    return FileResponse(BASE_DIR / "static" / "lab.css", media_type="text/css")
-
-
-@app.get("/lab.js", include_in_schema=False)
-async def learning_lab_js() -> FileResponse:
-    return FileResponse(BASE_DIR / "static" / "lab.js", media_type="text/javascript")
-
-
-@app.get("/stratos.css", include_in_schema=False)
-async def shared_styles() -> FileResponse:
-    return FileResponse(BASE_DIR / "static" / "stratos.css", media_type="text/css")
-
-
-@app.get("/monitor.js", include_in_schema=False)
-async def monitor_script() -> FileResponse:
-    return FileResponse(BASE_DIR / "static" / "monitor.js", media_type="text/javascript")
+async def service_info() -> dict[str, str]:
+    return {
+        "service": "stratos",
+        "health": "/health",
+        "tasks": "/api/tasks",
+        "docs": "/docs",
+    }
 
 
 @app.get("/health")
