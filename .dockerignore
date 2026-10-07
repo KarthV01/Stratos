@@ -1,0 +1,11 @@
+.git
+.tools
+.venv
+__pycache__
+.pytest_cache
+docs
+infra
+k8s
+tests
+compose.yaml
+README.md

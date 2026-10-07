@@ -34,10 +34,28 @@ List recent tasks:
 curl http://localhost:8000/api/tasks
 ```
 
+## Run on the local Kubernetes cluster
+
+The development cluster has one control-plane node and three worker nodes. The
+application also runs three worker pods, with one scheduled on each worker node.
+
+```powershell
+.\infra\minikube\install-minikube.ps1
+.\infra\minikube\start.ps1
+.\infra\minikube\access-api.ps1
+```
+
+Open `http://localhost:8000/docs`. Stop the port-forward with Ctrl+C. Stop the
+cluster without deleting it with `.\infra\minikube\stop.ps1`.
+
+Read [`docs/kubernetes.md`](docs/kubernetes.md) for the complete build and
+request flow, and [`docs/esp32-integration.md`](docs/esp32-integration.md) before
+connecting physical devices.
+
 ## Backend roadmap
 
 This is not production-ready yet. Important next steps include idempotent effects, task timeouts, bounded retries, dead-letter handling, stale-message claiming, graceful worker shutdown, authentication and authorization, retention controls, metrics, and capacity planning.
 
-Docker and Compose are configured. Kubernetes manifests have not been added yet.
+Docker Compose and a local multi-node Kubernetes environment are configured.
 
 The removed frontend's visual system is recorded in `docs/frontend-layout-reference.md` for future reuse without keeping frontend runtime code in this backend repository.
