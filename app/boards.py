@@ -37,7 +37,7 @@ TIER_DETAILS: dict[AgentTier, dict[str, Any]] = {
     },
     AgentTier.EMBEDDED: {
         "code": "embedded-agent",
-        "hardware": "ESP32, STM32, RP2040, and similar capable MCUs",
+        "hardware": "Networked ESP32, STM32, RP2040, and similar capable MCUs",
         "functionality": [
             "sensor-processing",
             "predefined-tasks",
@@ -46,7 +46,7 @@ TIER_DETAILS: dict[AgentTier, dict[str, Any]] = {
     },
     AgentTier.MINIMAL: {
         "code": "minimal-agent",
-        "hardware": "Arduino Uno, ATtiny, and extremely constrained MCUs",
+        "hardware": "ESP8266 and constrained Arduino Wi-Fi boards",
         "functionality": [
             "simple-commands",
             "sensor-reporting",
@@ -76,9 +76,7 @@ class BoardProfile:
     def connection_mode(self) -> str:
         if self.agent_tier == AgentTier.FULL:
             return "agent"
-        if self.agent_tier == AgentTier.EMBEDDED and self.ip_network:
-            return "mqtt"
-        return "gateway"
+        return "mqtt"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -130,6 +128,10 @@ def board_directory() -> tuple[BoardProfile, ...]:
             aliases=tuple(item.get("aliases", [])),
             source=item["source"],
         )
+        if not profile.ip_network:
+            raise RuntimeError(
+                f"Board {profile.identifier} cannot reach Stratos over an IP network"
+            )
         for key in {
             normalize_identifier(candidate)
             for candidate in (profile.identifier, profile.name, *profile.aliases)
@@ -165,14 +167,14 @@ def tier_catalog() -> list[dict[str, Any]]:
 
 
 def classify_capabilities(
-    *, linux: bool, ram_mb: int, accelerator: bool, ip_network: bool
+    *, linux: bool, ram_kb: int, accelerator: bool, ip_network: bool
 ) -> AgentTier:
     """Conservatively classify an unknown board from reported capabilities."""
+    if not ip_network:
+        raise ValueError("A board must support an IP network and MQTT or a full agent")
     if linux:
         return AgentTier.FULL
-    if ram_mb >= 1 or ip_network:
-        return AgentTier.EMBEDDED
-    if accelerator:
+    if accelerator or ram_kb >= 128:
         return AgentTier.EMBEDDED
     return AgentTier.MINIMAL
 

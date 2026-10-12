@@ -30,7 +30,7 @@ class TaskRequest(BaseModel):
 
 class ReportedBoardCapabilities(BaseModel):
     linux: bool = False
-    ram_mb: int = Field(default=0, ge=0, le=1_048_576)
+    ram_kb: int = Field(default=0, ge=0, le=1_073_741_824)
     accelerator: bool = False
     ip_network: bool = False
 
@@ -130,22 +130,19 @@ async def identify_board(body: BoardIdentityRequest) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Unknown board; report capabilities")
 
     capabilities = body.capabilities
-    agent_tier = classify_capabilities(
-        linux=capabilities.linux,
-        ram_mb=capabilities.ram_mb,
-        accelerator=capabilities.accelerator,
-        ip_network=capabilities.ip_network,
-    )
+    try:
+        agent_tier = classify_capabilities(
+            linux=capabilities.linux,
+            ram_kb=capabilities.ram_kb,
+            accelerator=capabilities.accelerator,
+            ip_network=capabilities.ip_network,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     tier_details = next(
         item for item in tier_catalog() if item["tier"] == int(agent_tier)
     )
-    connection_mode = (
-        "agent"
-        if capabilities.linux
-        else "mqtt"
-        if capabilities.ip_network
-        else "gateway"
-    )
+    connection_mode = "agent" if capabilities.linux else "mqtt"
     return {
         "protocol": PROTOCOL_VERSION,
         "device_id": body.device_id,

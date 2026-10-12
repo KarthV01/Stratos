@@ -25,7 +25,7 @@ class BoardDirectoryTests(unittest.TestCase):
         boards = board_directory()
         vendors = {board.vendor for board in boards}
 
-        self.assertGreaterEqual(len(boards), 50)
+        self.assertGreaterEqual(len(boards), 40)
         self.assertTrue(
             {"Arduino", "Espressif", "Raspberry Pi", "NVIDIA", "BeagleBoard.org"}
             <= vendors
@@ -54,15 +54,38 @@ class BoardDirectoryTests(unittest.TestCase):
         self.assertEqual(
             AgentTier.FULL,
             classify_capabilities(
-                linux=True, ram_mb=512, accelerator=False, ip_network=True
+                linux=True, ram_kb=524_288, accelerator=False, ip_network=True
             ),
         )
         self.assertEqual(
-            AgentTier.MINIMAL,
+            AgentTier.EMBEDDED,
             classify_capabilities(
-                linux=False, ram_mb=0, accelerator=False, ip_network=False
+                linux=False, ram_kb=520, accelerator=False, ip_network=True
             ),
         )
+
+    def test_every_non_full_board_can_use_mqtt(self) -> None:
+        for board in board_directory():
+            self.assertTrue(board.ip_network, board.identifier)
+            if board.agent_tier != AgentTier.FULL:
+                self.assertEqual("mqtt", board.connection_mode, board.identifier)
+
+    def test_non_networked_boards_are_not_in_the_directory(self) -> None:
+        for unsupported in ("Arduino Uno R3", "ATtiny85", "Pico", "micro:bit v2"):
+            self.assertIsNone(resolve_board(unsupported), unsupported)
+
+    def test_minimal_tier_contains_mqtt_capable_boards(self) -> None:
+        for identifier in ("esp8266", "uno r4 wifi", "nano 33 iot"):
+            board = resolve_board(identifier)
+            self.assertIsNotNone(board)
+            self.assertEqual(AgentTier.MINIMAL, board.agent_tier)
+            self.assertEqual("mqtt", board.connection_mode)
+
+    def test_board_without_ip_network_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must support an IP network"):
+            classify_capabilities(
+                linux=False, ram_kb=32, accelerator=False, ip_network=False
+            )
 
 
 class BoardWireProtocolTests(unittest.TestCase):
@@ -79,7 +102,7 @@ class BoardWireProtocolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             encode_hello("esp32|fake", "device-1")
 
-    def test_identity_response_contains_class_and_connection_mode(self) -> None:
+    def test_identity_response_contains_tier_and_connection_mode(self) -> None:
         profile = resolve_board("pico w")
 
         self.assertIsNotNone(profile)
@@ -120,7 +143,7 @@ class BoardApiTests(unittest.TestCase):
                     device_id="future-01",
                     capabilities=ReportedBoardCapabilities(
                         linux=True,
-                        ram_mb=4096,
+                        ram_kb=4 * 1024 * 1024,
                         accelerator=False,
                         ip_network=True,
                     ),
@@ -130,6 +153,25 @@ class BoardApiTests(unittest.TestCase):
 
         self.assertTrue(response["provisional"])
         self.assertEqual("full-agent", response["board"]["tier_code"])
+
+    def test_unknown_non_network_board_is_rejected(self) -> None:
+        with self.assertRaises(HTTPException) as context:
+            asyncio.run(
+                identify_board(
+                    BoardIdentityRequest(
+                        board="Offline MCU",
+                        device_id="offline-01",
+                        capabilities=ReportedBoardCapabilities(
+                            linux=False,
+                            ram_kb=32,
+                            accelerator=False,
+                            ip_network=False,
+                        ),
+                    )
+                )
+            )
+
+        self.assertEqual(422, context.exception.status_code)
 
     def test_directory_can_filter_by_tier(self) -> None:
         response = asyncio.run(list_boards(tier=1, vendor=None))

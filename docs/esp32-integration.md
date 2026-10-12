@@ -2,8 +2,8 @@
 
 Board behavior is selected by the three-tier Stratos Board Protocol documented
 in `docs/board-identity-protocol.md`. ESP32 devices are Tier 2 Embedded Agents;
-Linux SBCs and PCs are Tier 1 Full Agents; extremely constrained boards are Tier
-3 Minimal Agents.
+Linux SBCs and PCs are Tier 1 Full Agents; constrained MQTT-capable devices such
+as ESP8266 and small Arduino Wi-Fi boards are Tier 3 Minimal Agents.
 
 An ESP32 should not become a Kubernetes worker node. Kubernetes nodes run a full
 Linux operating system, kubelet, and a container runtime; an ESP32 is a
@@ -12,35 +12,27 @@ run a resident Stratos agent directly without using MQTT.
 
 ## Recommended connection
 
-The first implementation can use HTTPS:
+The embedded runtime path uses MQTT:
 
-1. The ESP32 joins Wi-Fi and authenticates to a device-facing gateway.
-2. It sends a small request containing its device ID, reading/command, sequence
-   number, and firmware version.
-3. The gateway validates and normalizes the message, then creates a Stratos task.
+1. The ESP32 joins Wi-Fi and authenticates to the MQTT broker.
+2. It publishes a small message containing its device ID, reading/command,
+   sequence number, and firmware version.
+3. The MQTT ingress validates and normalizes the message, then creates a Stratos
+   task.
 4. A worker processes the task and stores or publishes the result.
-5. The ESP32 polls for a result, or receives it through MQTT in a later phase.
+5. The ESP32 receives commands and results through its authorized MQTT topics.
 
-MQTT is often a better eventual fit for intermittent Tier 2 devices and
-publish/subscribe telemetry, but it needs a broker, per-device credentials,
-topic authorization, retained-message policy, and delivery/idempotency design.
-Those components are deliberately not faked by the current HTTP task API. Tier 1
-devices use direct agent communication; Tier 3 devices communicate through a
-gateway.
+MQTT needs a broker, per-device credentials, topic authorization,
+retained-message policy, and delivery/idempotency design. Tier 1 devices use
+direct agent communication; both Tier 2 and Tier 3 use MQTT.
 
 ## Local hardware test
 
-Windows cannot normally route a LAN device directly to a Minikube node created
-with the Docker driver. Forward the controller Service through the host instead:
-
-```powershell
-.\infra\minikube\access-api.ps1 -Lan
-```
-
-The ESP32 can then call `http://<computer-lan-ip>:8000`. This is a temporary lab
-path only. It exposes an unauthenticated HTTP endpoint and may require a narrowly
-scoped Windows Firewall rule for TCP port 8000. Do not use it on an untrusted
-network.
+After the MQTT implementation branch is merged, expose the broker on a host
+address reachable from the lab Wi-Fi network and configure the ESP32 with that
+host, its assigned device ID, and its per-device credential. Use TCP 1883 only
+on an isolated test network; use MQTT over TLS on 8883 outside that lab setup.
+Do not point embedded boards at the controller's HTTP API.
 
 ## Requirements before real devices
 
@@ -48,7 +40,7 @@ Before field or production use, add:
 
 - TLS with certificate validation on the ESP32.
 - A unique credential and revocation path for every device.
-- Authentication and authorization at a gateway, not in worker pods.
+- Authentication and authorization at the MQTT broker/ingress, not in workers.
 - A stable external address through a real Ingress or LoadBalancer.
 - Request size/rate limits and schema validation.
 - A device-generated message ID for idempotent retries.

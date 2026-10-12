@@ -1,23 +1,23 @@
 # Stratos Board Protocol (SBP/1)
 
 SBP identifies a board model, assigns its Stratos agent tier, and tells the
-device which connection mode to use. It deliberately separates **execution
-capability** from **network connectivity**: two boards can share a tier while
-one has Wi-Fi and the other requires a gateway.
+device which connection mode to use. Every supported board must have an IP path
+to Stratos. Full Agents use the native agent protocol; all other supported boards
+must be able to run MQTT.
 
 ## Agent tiers
 
 | Tier | Hardware | Stratos functionality |
 | --- | --- | --- |
 | 1. Full Agent | Raspberry Pi, Jetson, x86 PCs, Linux SBCs | Task execution, local scheduling, networking, telemetry, complex workloads |
-| 2. Embedded Agent | ESP32, STM32, RP2040 | Sensor processing, predefined tasks, lightweight communication |
-| 3. Minimal Agent | Arduino Uno, ATtiny, extremely constrained MCUs | Very simple commands, sensor reporting, limited state |
+| 2. Embedded Agent | Networked ESP32, STM32, RP2040/Pico W | Sensor processing, predefined tasks, lightweight MQTT communication |
+| 3. Minimal Agent | ESP8266, Arduino Nano 33 IoT, MKR WiFi, UNO R4 WiFi | Very simple commands, sensor reporting, limited MQTT state |
 
 Tier numbers are protocol identifiers, not benchmark scores. Tier 1 is the most
 autonomous. A Tier 1 device can run a resident Stratos agent and communicate
-directly over the network; it does not need MQTT. A Tier 2 device normally uses
-MQTT when it has an IP interface, or a serial/radio gateway when it does not. A
-Tier 3 device always uses a gateway so its firmware stays tiny.
+directly over the network; it does not need MQTT. Tier 2 and Tier 3 devices both
+use MQTT. Tier 3 differs by its smaller command vocabulary, state, and telemetry
+budget—not by using a different transport.
 
 ## Canonical identifiers
 
@@ -121,15 +121,17 @@ An unknown future board may report capabilities to receive a provisional tier:
   "device_id": "future-01",
   "capabilities": {
     "linux": true,
-    "ram_mb": 4096,
+    "ram_kb": 4194304,
     "accelerator": false,
     "ip_network": true
   }
 }
 ```
 
-Known-directory classifications are authoritative. Self-reported classifications
-are marked `provisional: true` and must not grant trust or authorization.
+Known-directory classifications are authoritative. Unknown boards without an IP
+network are rejected because they cannot use either supported cluster path.
+Self-reported classifications are marked `provisional: true` and must not grant
+trust or authorization.
 Identity answers what hardware a device says it is; authentication must later
 prove which physical device sent the message.
 
@@ -138,16 +140,15 @@ prove which physical device sent the message.
 | Mode | Selected when | Expected implementation |
 | --- | --- | --- |
 | `agent` | Tier 1 | Resident Linux/Windows Stratos service using HTTPS, WebSocket, or gRPC |
-| `mqtt` | Tier 2 with an IP network | Small MQTT client executing a fixed command vocabulary |
-| `gateway` | Tier 2 without IP, or any Tier 3 | UART, BLE, CAN, or radio link to a trusted gateway |
+| `mqtt` | Tier 2 or Tier 3 | MQTT client; Tier 3 uses a smaller vocabulary and state budget |
 
-MQTT is therefore an implementation option for embedded hardware, not a
-requirement for every board.
+MQTT is mandatory for every non-Full Agent. Serial-only, BLE-only, or otherwise
+offline microcontrollers are intentionally absent from the directory.
 
 ## Catalog coverage and sources
 
-The initial directory contains 54 profiles across Arduino, Microchip ATtiny,
-Espressif, Raspberry Pi/Pico, micro:bit, Teensy, STM32 Nucleo, BeagleBoard,
+The initial directory contains 46 profiles across Arduino, Espressif,
+Raspberry Pi/Pico W, Teensy, networked STM32 Nucleo, BeagleBoard,
 Orange Pi, Radxa, NVIDIA Jetson, Coral, AMD Kria, PYNQ, LattePanda, and UP Board,
 plus generic x86-64 and ARM64 Linux identifiers.
 
@@ -167,4 +168,5 @@ Important official family references include:
 
 No finite registry can literally contain every board or clone. The aliases,
 generic Linux identifiers, provisional capability path, and source-per-record
-format keep the protocol usable as new hardware appears without changing SBP/1.
+format keep the protocol usable as new MQTT-capable hardware appears without
+changing SBP/1.

@@ -55,8 +55,8 @@ connecting physical devices.
 ## Board identity protocol
 
 Stratos classifies hardware into Full, Embedded, and Minimal Agent tiers. The
-directory recognizes common ESP32, STM32, RP2040, Raspberry Pi, Jetson, Linux
-SBC, x86, and accelerator boards while remaining extensible for future models.
+directory recognizes common MQTT-capable ESP32, STM32, Pico W, constrained
+Arduino Wi-Fi, Raspberry Pi, Jetson, Linux SBC, x86, and accelerator boards.
 See [`docs/board-identity-protocol.md`](docs/board-identity-protocol.md) for the
 wire format, API, tier behavior, and catalog.
 
