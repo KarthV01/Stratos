@@ -9,6 +9,15 @@ x-worker: &worker
     REDIS_URL: redis://redis:6379/0
 
 services:
+  mqtt:
+    image: eclipse-mosquitto:2.0.22
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./infra/mosquitto/mosquitto.dev.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqtt-data:/mosquitto/data
+
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
@@ -32,6 +41,21 @@ services:
     ports:
       - "8000:8000"
 
+  mqtt-bridge:
+    build: .
+    command: ["python", "-m", "app.mqtt_bridge"]
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      mqtt:
+        condition: service_started
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+      MQTT_BRIDGE_ID: mqtt-bridge-compose
+
   worker-1:
     <<: *worker
     environment:
@@ -52,3 +76,4 @@ services:
 
 volumes:
   broker-data:
+  mqtt-data:

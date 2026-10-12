@@ -9,6 +9,7 @@ Stratos is a small distributed task system for learning and building the backend
 - Three worker containers compete for tasks.
 - Workers report queued, running, completed, and failed lifecycle events.
 - Redis append-only persistence retains broker and task state across ordinary restarts.
+- Mosquitto and the MQTT bridge connect constrained devices without exposing the Kubernetes API.
 
 The task handler in `app/handler.py` is intentionally small. It is the boundary where real work—an agent invocation, document processor, automation step, or other long-running operation—can replace the demonstration delay.
 
@@ -59,6 +60,17 @@ directory recognizes common MQTT-capable ESP32, STM32, Pico W, constrained
 Arduino Wi-Fi, Raspberry Pi, Jetson, Linux SBC, x86, and accelerator boards.
 See [`docs/board-identity-protocol.md`](docs/board-identity-protocol.md) for the
 wire format, API, tier behavior, and catalog.
+
+## MQTT devices
+
+Tier 2 and network-capable Tier 3 devices use the compact SMP/1 protocol over
+MQTT 3.1.1. The cluster bridge validates identities, records telemetry and
+state, and delivers idempotent predefined commands through Redis Streams.
+
+See [`docs/mqtt-device-protocol.md`](docs/mqtt-device-protocol.md) for the wire
+contract and [`docs/mqtt-implementation-plan.md`](docs/mqtt-implementation-plan.md)
+for architecture, rollout, and local-cluster connection details. Portable C99
+firmware helpers are in [`firmware/smp1`](firmware/smp1).
 
 ## Backend roadmap
 

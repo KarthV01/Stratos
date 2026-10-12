@@ -1,7 +1,13 @@
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError
 
-from app.config import REDIS_URL, TASK_STREAM, WORKER_GROUP
+from app.config import (
+    DEVICE_COMMAND_STREAM,
+    MQTT_BRIDGE_GROUP,
+    REDIS_URL,
+    TASK_STREAM,
+    WORKER_GROUP,
+)
 
 
 def redis_client() -> Redis:
@@ -16,3 +22,13 @@ async def ensure_worker_group(redis: Redis) -> None:
         if "BUSYGROUP" not in str(exc):
             raise
 
+
+async def ensure_mqtt_bridge_group(redis: Redis) -> None:
+    """Create the command delivery group used by MQTT bridge replicas."""
+    try:
+        await redis.xgroup_create(
+            DEVICE_COMMAND_STREAM, MQTT_BRIDGE_GROUP, id="0", mkstream=True
+        )
+    except ResponseError as exc:
+        if "BUSYGROUP" not in str(exc):
+            raise
