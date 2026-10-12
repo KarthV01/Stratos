@@ -19,7 +19,17 @@ from app.boards import (
     resolve_board,
     tier_catalog,
 )
-from app.config import EVENT_STREAM, TASK_INDEX, TASK_STREAM
+from app.config import (
+    DEVICE_COMMAND_INDEX,
+    DEVICE_COMMAND_STREAM,
+    DEVICE_INDEX,
+    EVENT_STREAM,
+    TASK_INDEX,
+    TASK_STREAM,
+)
+from app.mqtt_bridge import device_command_key, device_key, device_state_key
+from app.mqtt_protocol import PROTOCOL_NAME as MQTT_PROTOCOL_NAME
+from app.mqtt_protocol import validate_device_id, validate_token
 
 
 class TaskRequest(BaseModel):
@@ -41,6 +51,11 @@ class BoardIdentityRequest(BaseModel):
     device_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
     firmware: str = Field(default="-", pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$")
     capabilities: ReportedBoardCapabilities | None = None
+
+
+class DeviceCommandRequest(BaseModel):
+    opcode: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,63}$")
+    argument: str = Field(default="-", pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,63}$")
 
 
 def task_key(task_id: str) -> str:
@@ -77,6 +92,7 @@ async def service_info() -> dict[str, str]:
         "health": "/health",
         "tasks": "/api/tasks",
         "boards": "/api/boards",
+        "devices": "/api/devices",
         "docs": "/docs",
     }
 
@@ -166,6 +182,79 @@ async def identify_board(body: BoardIdentityRequest) -> dict[str, Any]:
             "source": None,
         },
     }
+
+
+@app.get("/api/devices")
+async def list_devices(
+    request: Request, limit: int = Query(default=100, ge=1, le=500)
+) -> list[dict[str, Any]]:
+    redis: Redis = request.app.state.redis
+    ids = await redis.zrevrange(DEVICE_INDEX, 0, limit - 1)
+    if not ids:
+        return []
+    async with redis.pipeline(transaction=False) as pipe:
+        for device_id in ids:
+            pipe.hgetall(device_key(device_id))
+        devices = await pipe.execute()
+    return [device for device in devices if device]
+
+
+@app.get("/api/devices/{device_id}")
+async def get_device(device_id: str, request: Request) -> dict[str, Any]:
+    try:
+        validate_device_id(device_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    redis: Redis = request.app.state.redis
+    device = await redis.hgetall(device_key(device_id))
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    device["state"] = await redis.hgetall(device_state_key(device_id))
+    device["protocol"] = MQTT_PROTOCOL_NAME
+    return device
+
+
+@app.post("/api/devices/{device_id}/commands", status_code=202)
+async def create_device_command(
+    device_id: str, body: DeviceCommandRequest, request: Request
+) -> dict[str, Any]:
+    try:
+        validate_device_id(device_id)
+        validate_token(body.opcode, name="opcode")
+        validate_token(body.argument, name="argument")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    redis: Redis = request.app.state.redis
+    if not await redis.exists(device_key(device_id)):
+        raise HTTPException(status_code=404, detail="Device not found")
+    command_id = f"cmd-{uuid4().hex}"
+    now = time.time()
+    sequence = (await redis.incr(f"device-command-sequence:{device_id}")) & 0xFFFFFFFF
+    record = {
+        "id": command_id,
+        "device_id": device_id,
+        "opcode": body.opcode,
+        "argument": body.argument,
+        "sequence": str(sequence),
+        "status": "queued",
+        "created_at": str(now),
+        "updated_at": str(now),
+    }
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.hset(device_command_key(command_id), mapping=record)
+        pipe.zadd(DEVICE_COMMAND_INDEX, {command_id: now})
+        pipe.xadd(
+            DEVICE_COMMAND_STREAM,
+            {
+                "command_id": command_id,
+                "device_id": device_id,
+                "opcode": body.opcode,
+                "argument": body.argument,
+                "sequence": str(sequence),
+            },
+        )
+        await pipe.execute()
+    return record
 
 
 @app.post("/api/tasks", status_code=202)

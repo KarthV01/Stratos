@@ -1,0 +1,48 @@
+#ifndef STRATOS_SMP1_H
+#define STRATOS_SMP1_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#define SMP1_MAX_FRAME_BYTES 256u
+#define SMP1_MAX_FIELDS 4u
+#define SMP1_MAX_DEVICE_ID 64u
+
+typedef enum {
+    SMP1_HELLO = 'H',
+    SMP1_TELEMETRY = 'T',
+    SMP1_STATE = 'S',
+    SMP1_ACK = 'A',
+    SMP1_WELCOME = 'W',
+    SMP1_COMMAND = 'C',
+    SMP1_ERROR = 'E'
+} smp1_type_t;
+
+typedef struct {
+    smp1_type_t type;
+    uint32_t sequence;
+    uint8_t field_count;
+    char *fields[SMP1_MAX_FIELDS];
+} smp1_frame_t;
+
+/* Parses in place and replaces separators with NUL. payload[len] must be NUL. */
+int smp1_parse(char *payload, size_t len, smp1_frame_t *frame);
+
+int smp1_encode(
+    char *output,
+    size_t capacity,
+    smp1_type_t type,
+    uint32_t sequence,
+    uint8_t field_count,
+    const char *const fields[]
+);
+
+int smp1_topic(
+    char *output,
+    size_t capacity,
+    const char *device_id,
+    const char *direction,
+    const char *channel
+);
+
+#endif
