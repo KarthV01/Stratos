@@ -52,6 +52,14 @@ Read [`docs/kubernetes.md`](docs/kubernetes.md) for the complete build and
 request flow, and [`docs/esp32-integration.md`](docs/esp32-integration.md) before
 connecting physical devices.
 
+## Board identity protocol
+
+Stratos classifies hardware into Full, Embedded, and Minimal Agent tiers. The
+directory recognizes common ESP32, STM32, RP2040, Raspberry Pi, Jetson, Linux
+SBC, x86, and accelerator boards while remaining extensible for future models.
+See [`docs/board-identity-protocol.md`](docs/board-identity-protocol.md) for the
+wire format, API, tier behavior, and catalog.
+
 ## Backend roadmap
 
 This is not production-ready yet. Important next steps include idempotent effects, task timeouts, bounded retries, dead-letter handling, stale-message claiming, graceful worker shutdown, authentication and authorization, retention controls, metrics, and capacity planning.

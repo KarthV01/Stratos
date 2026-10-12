@@ -2,7 +2,7 @@ import asyncio
 import json
 import time
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -11,6 +11,14 @@ from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 
 from app.broker import ensure_worker_group, redis_client
+from app.boards import (
+    PROTOCOL_VERSION,
+    board_directory,
+    classify_capabilities,
+    normalize_identifier,
+    resolve_board,
+    tier_catalog,
+)
 from app.config import EVENT_STREAM, TASK_INDEX, TASK_STREAM
 
 
@@ -18,6 +26,21 @@ class TaskRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10_000)
     delay_seconds: float = Field(default=2, ge=0, le=30)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReportedBoardCapabilities(BaseModel):
+    linux: bool = False
+    ram_mb: int = Field(default=0, ge=0, le=1_048_576)
+    accelerator: bool = False
+    ip_network: bool = False
+
+
+class BoardIdentityRequest(BaseModel):
+    protocol: Literal["sbp/1"] = PROTOCOL_VERSION
+    board: str = Field(min_length=1, max_length=100)
+    device_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
+    firmware: str = Field(default="-", pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$")
+    capabilities: ReportedBoardCapabilities | None = None
 
 
 def task_key(task_id: str) -> str:
@@ -53,6 +76,7 @@ async def service_info() -> dict[str, str]:
         "service": "stratos",
         "health": "/health",
         "tasks": "/api/tasks",
+        "boards": "/api/boards",
         "docs": "/docs",
     }
 
@@ -61,6 +85,87 @@ async def service_info() -> dict[str, str]:
 async def health(request: Request) -> dict[str, str]:
     await request.app.state.redis.ping()
     return {"status": "ok"}
+
+
+@app.get("/api/boards")
+async def list_boards(
+    tier: int | None = Query(default=None, ge=1, le=3),
+    vendor: str | None = Query(default=None),
+) -> dict[str, Any]:
+    profiles = board_directory()
+    if tier is not None:
+        profiles = tuple(board for board in profiles if int(board.agent_tier) == tier)
+    if vendor is not None:
+        profiles = tuple(
+            board for board in profiles if board.vendor.casefold() == vendor.casefold()
+        )
+    return {
+        "protocol": PROTOCOL_VERSION,
+        "tiers": tier_catalog(),
+        "boards": [board.as_dict() for board in profiles],
+    }
+
+
+@app.get("/api/boards/resolve")
+async def get_board(identifier: str = Query(min_length=1, max_length=100)) -> dict[str, Any]:
+    profile = resolve_board(identifier)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Unknown board identifier")
+    return {"protocol": PROTOCOL_VERSION, "board": profile.as_dict()}
+
+
+@app.post("/api/boards/identify")
+async def identify_board(body: BoardIdentityRequest) -> dict[str, Any]:
+    profile = resolve_board(body.board)
+    if profile is not None:
+        return {
+            "protocol": PROTOCOL_VERSION,
+            "device_id": body.device_id,
+            "firmware": body.firmware,
+            "provisional": False,
+            "board": profile.as_dict(),
+        }
+
+    if body.capabilities is None:
+        raise HTTPException(status_code=404, detail="Unknown board; report capabilities")
+
+    capabilities = body.capabilities
+    agent_tier = classify_capabilities(
+        linux=capabilities.linux,
+        ram_mb=capabilities.ram_mb,
+        accelerator=capabilities.accelerator,
+        ip_network=capabilities.ip_network,
+    )
+    tier_details = next(
+        item for item in tier_catalog() if item["tier"] == int(agent_tier)
+    )
+    connection_mode = (
+        "agent"
+        if capabilities.linux
+        else "mqtt"
+        if capabilities.ip_network
+        else "gateway"
+    )
+    return {
+        "protocol": PROTOCOL_VERSION,
+        "device_id": body.device_id,
+        "firmware": body.firmware,
+        "provisional": True,
+        "board": {
+            "id": f"reported/{normalize_identifier(body.board)}",
+            "name": body.board,
+            "vendor": "reported",
+            "tier": int(agent_tier),
+            "tier_code": tier_details["code"],
+            "functionality": tier_details["functionality"],
+            "linux": capabilities.linux,
+            "ip_network": capabilities.ip_network,
+            "accelerator": "reported" if capabilities.accelerator else None,
+            "connection_mode": connection_mode,
+            "aliases": [],
+            "source": None,
+        },
+    }
 
 
 @app.post("/api/tasks", status_code=202)

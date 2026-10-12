@@ -1,8 +1,14 @@
-# ESP32 integration boundary
+# Board integration boundary
+
+Board behavior is selected by the three-tier Stratos Board Protocol documented
+in `docs/board-identity-protocol.md`. ESP32 devices are Tier 2 Embedded Agents;
+Linux SBCs and PCs are Tier 1 Full Agents; extremely constrained boards are Tier
+3 Minimal Agents.
 
 An ESP32 should not become a Kubernetes worker node. Kubernetes nodes run a full
 Linux operating system, kubelet, and a container runtime; an ESP32 is a
-microcontroller. Treat it as a device client at the edge of the system.
+microcontroller. A Raspberry Pi, Jetson, x86 PC, or another Linux SBC can instead
+run a resident Stratos agent directly without using MQTT.
 
 ## Recommended connection
 
@@ -15,10 +21,12 @@ The first implementation can use HTTPS:
 4. A worker processes the task and stores or publishes the result.
 5. The ESP32 polls for a result, or receives it through MQTT in a later phase.
 
-MQTT is often a better eventual fit for intermittent devices and
+MQTT is often a better eventual fit for intermittent Tier 2 devices and
 publish/subscribe telemetry, but it needs a broker, per-device credentials,
 topic authorization, retained-message policy, and delivery/idempotency design.
-Those components are deliberately not faked by the current HTTP task API.
+Those components are deliberately not faked by the current HTTP task API. Tier 1
+devices use direct agent communication; Tier 3 devices communicate through a
+gateway.
 
 ## Local hardware test
 
