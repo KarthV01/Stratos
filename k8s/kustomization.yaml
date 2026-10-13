@@ -4,5 +4,6 @@ resources:
   - namespace.yaml
   - redis.yaml
   - mqtt.yaml
+  - gateway.yaml
   - controller.yaml
   - worker.yaml

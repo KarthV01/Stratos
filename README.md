@@ -10,6 +10,7 @@ Stratos is a small distributed task system for learning and building the backend
 - Workers report queued, running, completed, and failed lifecycle events.
 - Redis append-only persistence retains broker and task state across ordinary restarts.
 - Mosquitto and the MQTT bridge connect constrained devices without exposing the Kubernetes API.
+- The Stratos gateway accepts Full Agents over framed TCP or bidirectional gRPC and routes targeted work through Redis leases.
 
 The task handler in `app/handler.py` is intentionally small. It is the boundary where real work—an agent invocation, document processor, automation step, or other long-running operation—can replace the demonstration delay.
 
@@ -20,6 +21,7 @@ docker compose up --build
 ```
 
 The API is available at `http://localhost:8000`; interactive OpenAPI documentation is at `http://localhost:8000/docs`.
+Full Agents connect to TCP port `7442` or gRPC port `7443` through the gateway.
 
 Example task submission:
 
@@ -71,6 +73,17 @@ See [`docs/mqtt-device-protocol.md`](docs/mqtt-device-protocol.md) for the wire
 contract and [`docs/mqtt-implementation-plan.md`](docs/mqtt-implementation-plan.md)
 for architecture, rollout, and local-cluster connection details. Portable C99
 firmware helpers are in [`firmware/smp1`](firmware/smp1).
+
+## Full Agents
+
+Tier 1 Linux and Windows agents use the Stratos Agent Gateway Protocol (SAGP/1)
+over either framed TCP or a bidirectional gRPC stream. Both transports use the
+same protobuf messages, Redis-backed task leases, heartbeats, capacity signaling,
+and result validation. The reference Python client is `app/full_agent.py`.
+
+See [`docs/full-agent-gateway.md`](docs/full-agent-gateway.md) for the wire
+contract, client example, task API, TLS settings, deployment model, and protocol
+design sources.
 
 ## Backend roadmap
 

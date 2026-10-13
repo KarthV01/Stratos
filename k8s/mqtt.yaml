@@ -127,7 +127,7 @@ spec:
         - name: mqtt-bridge
           image: stratos:dev
           imagePullPolicy: Never
-          command: ["python", "-m", "app.mqtt_bridge"]
+          command: ["python", "-m", "app.stratos_gateway.mqtt"]
           env:
             - name: REDIS_URL
               value: redis://redis:6379/0
