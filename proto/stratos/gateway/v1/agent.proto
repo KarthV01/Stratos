@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package stratos.gateway.v1;
+
+service FullAgentGateway {
+  rpc Connect(stream AgentMessage) returns (stream GatewayMessage);
+}
+
+message AgentHello {
+  string protocol_version = 1;
+  string agent_id = 2;
+  string board = 3;
+  string agent_version = 4;
+  repeated string capabilities = 5;
+  string token = 6;
+}
+
+message Heartbeat {
+  int64 sent_at_unix_ms = 1;
+  repeated string running_task_ids = 2;
+}
+
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_SUCCEEDED = 1;
+  TASK_STATUS_FAILED = 2;
+}
+
+message TaskResult {
+  string task_id = 1;
+  string lease_id = 2;
+  TaskStatus status = 3;
+  string result_json = 4;
+  string error = 5;
+}
+
+message AgentMessage {
+  oneof payload {
+    AgentHello hello = 1;
+    Heartbeat heartbeat = 2;
+    TaskResult task_result = 3;
+  }
+}
+
+message Welcome {
+  string session_id = 1;
+  int32 heartbeat_interval_seconds = 2;
+  int64 server_time_unix_ms = 3;
+}
+
+message TaskAssignment {
+  string task_id = 1;
+  string lease_id = 2;
+  string payload_json = 3;
+}
+
+message ResultAck {
+  string task_id = 1;
+  bool accepted = 2;
+  string detail = 3;
+}
+
+message ProtocolError {
+  string code = 1;
+  string detail = 2;
+  bool fatal = 3;
+}
+
+message GatewayMessage {
+  oneof payload {
+    Welcome welcome = 1;
+    TaskAssignment task = 2;
+    ResultAck result_ack = 3;
+    ProtocolError error = 4;
+  }
+}
