@@ -25,6 +25,15 @@ int main(void) {
     assert(smp1_topic(topic, sizeof topic, "bad/device", "up", "hello") < 0);
     assert(smp1_topic(topic, sizeof topic, "sensor-1", "sideways", "hello") < 0);
 
+    {
+        const char *status[] = {"3", "76", "91"};
+        length = smp1_encode(
+            payload, sizeof payload, SMP1_MINIMAL_STATUS, 9u, 3u, status
+        );
+        assert(length > 0);
+        assert(strcmp(payload, "SMP1|M|9|3|76|91") == 0);
+    }
+
     strcpy(payload, "SMP1|H|1|a|b|2|base|extra");
     assert(smp1_parse(payload, strlen(payload), &frame) < 0);
     strcpy(payload, "SMP1|H|1|-bad|b|2|base");

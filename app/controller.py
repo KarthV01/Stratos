@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 
 from app.broker import ensure_worker_group, redis_client
+from app.agent_gateway import full_command_stream_maxlen, router as agent_router
 from app.boards import (
     PROTOCOL_VERSION,
     board_directory,
@@ -27,9 +28,16 @@ from app.config import (
     TASK_INDEX,
     TASK_STREAM,
 )
-from app.mqtt_bridge import device_command_key, device_key, device_state_key
+from app.device_store import (
+    agent_command_stream,
+    device_command_key,
+    device_key,
+    device_state_key,
+    latest_telemetry_key,
+)
 from app.mqtt_protocol import PROTOCOL_NAME as MQTT_PROTOCOL_NAME
 from app.mqtt_protocol import validate_device_id, validate_token
+from app.tier_payloads import FullCommand, encode_full_payload
 
 
 class TaskRequest(BaseModel):
@@ -56,6 +64,8 @@ class BoardIdentityRequest(BaseModel):
 class DeviceCommandRequest(BaseModel):
     opcode: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,63}$")
     argument: str = Field(default="-", pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,63}$")
+    arguments: dict[str, Any] | None = Field(default=None, max_length=64)
+    expires_at_ms: int | None = Field(default=None, ge=0)
 
 
 def task_key(task_id: str) -> str:
@@ -83,6 +93,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Stratos Task API", lifespan=lifespan)
+app.include_router(agent_router)
 
 
 @app.get("/", include_in_schema=False)
@@ -211,6 +222,38 @@ async def get_device(device_id: str, request: Request) -> dict[str, Any]:
     return device
 
 
+@app.get("/api/devices/{device_id}/telemetry/latest")
+async def get_device_latest_telemetry(
+    device_id: str, request: Request
+) -> dict[str, Any]:
+    try:
+        validate_device_id(device_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    redis: Redis = request.app.state.redis
+    if not await redis.exists(device_key(device_id)):
+        raise HTTPException(status_code=404, detail="Device not found")
+    record = await redis.hgetall(latest_telemetry_key(device_id))
+    if not record:
+        raise HTTPException(status_code=404, detail="No telemetry received")
+    record["payload"] = json.loads(record["payload"])
+    return record
+
+
+@app.get("/api/devices/{device_id}/commands/{command_id}")
+async def get_device_command(
+    device_id: str, command_id: str, request: Request
+) -> dict[str, Any]:
+    redis: Redis = request.app.state.redis
+    record = await redis.hgetall(device_command_key(command_id))
+    if not record or record.get("device_id") != device_id:
+        raise HTTPException(status_code=404, detail="Command not found")
+    for field in ("arguments", "result"):
+        if field in record:
+            record[field] = json.loads(record[field])
+    return record
+
+
 @app.post("/api/devices/{device_id}/commands", status_code=202)
 async def create_device_command(
     device_id: str, body: DeviceCommandRequest, request: Request
@@ -222,7 +265,8 @@ async def create_device_command(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     redis: Redis = request.app.state.redis
-    if not await redis.exists(device_key(device_id)):
+    device = await redis.hgetall(device_key(device_id))
+    if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     command_id = f"cmd-{uuid4().hex}"
     now = time.time()
@@ -236,20 +280,51 @@ async def create_device_command(
         "status": "queued",
         "created_at": str(now),
         "updated_at": str(now),
+        "transport": device.get("transport", "mqtt"),
     }
+    full_command_payload: str | None = None
+    if device.get("tier") == "1" and device.get("transport") == "https":
+        command = FullCommand(
+            command_id=command_id,
+            sequence=sequence,
+            issued_at_ms=int(now * 1000),
+            expires_at_ms=body.expires_at_ms,
+            opcode=body.opcode,
+            arguments=body.arguments
+            if body.arguments is not None
+            else ({"value": body.argument} if body.argument != "-" else {}),
+        )
+        try:
+            full_command_payload = encode_full_payload(command).decode("utf-8")
+        except ValueError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        record["arguments"] = json.dumps(command.arguments, separators=(",", ":"))
+    elif body.arguments is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="Tier 2/3 commands accept one compact argument token",
+        )
     async with redis.pipeline(transaction=True) as pipe:
         pipe.hset(device_command_key(command_id), mapping=record)
         pipe.zadd(DEVICE_COMMAND_INDEX, {command_id: now})
-        pipe.xadd(
-            DEVICE_COMMAND_STREAM,
-            {
-                "command_id": command_id,
-                "device_id": device_id,
-                "opcode": body.opcode,
-                "argument": body.argument,
-                "sequence": str(sequence),
-            },
-        )
+        if full_command_payload is not None:
+            pipe.xadd(
+                agent_command_stream(device_id),
+                {"payload": full_command_payload},
+                maxlen=full_command_stream_maxlen(),
+                approximate=True,
+            )
+        else:
+            pipe.xadd(
+                DEVICE_COMMAND_STREAM,
+                {
+                    "command_id": command_id,
+                    "device_id": device_id,
+                    "opcode": body.opcode,
+                    "argument": body.argument,
+                    "sequence": str(sequence),
+                },
+            )
         await pipe.execute()
     return record
 

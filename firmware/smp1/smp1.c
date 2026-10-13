@@ -6,7 +6,23 @@
 
 static int valid_token(const char *value) {
     size_t length = 0;
+    int decimal_points = 0;
     if (value == NULL || value[0] == '\0') return 0;
+    if (value[0] == '-') {
+        if (value[1] == '\0') return 1;
+        if (value[1] < '0' || value[1] > '9') return 0;
+        length = 1;
+        while (value[length] != '\0') {
+            char c = value[length];
+            if (c == '.') {
+                if (++decimal_points > 1 || value[length + 1] == '\0') return 0;
+            } else if (c < '0' || c > '9') {
+                return 0;
+            }
+            if (++length > 64u) return 0;
+        }
+        return 1;
+    }
     if (!((value[0] >= 'A' && value[0] <= 'Z') ||
           (value[0] >= 'a' && value[0] <= 'z') ||
           (value[0] >= '0' && value[0] <= '9'))) return 0;
@@ -28,6 +44,9 @@ static int expected_fields(smp1_type_t type) {
         case SMP1_WELCOME: return 2;
         case SMP1_COMMAND: return 3;
         case SMP1_ERROR: return 2;
+        case SMP1_DRONE_SNAPSHOT: return 11;
+        case SMP1_MINIMAL_STATUS: return 3;
+        case SMP1_EVENT: return 3;
         default: return -1;
     }
 }

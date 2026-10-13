@@ -72,6 +72,10 @@ contract and [`docs/mqtt-implementation-plan.md`](docs/mqtt-implementation-plan.
 for architecture, rollout, and local-cluster connection details. Portable C99
 firmware helpers are in [`firmware/smp1`](firmware/smp1).
 
+The complete drone-to-ground payload matrix—including the Tier 1 HTTPS/JSON
+agent protocol and normalized flight fields for all tiers—is documented in
+[`docs/tier-payload-protocols.md`](docs/tier-payload-protocols.md).
+
 ## Backend roadmap
 
 This is not production-ready yet. Important next steps include idempotent effects, task timeouts, bounded retries, dead-letter handling, stale-message claiming, graceful worker shutdown, authentication and authorization, retention controls, metrics, and capacity planning.

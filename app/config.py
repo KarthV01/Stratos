@@ -16,3 +16,4 @@ DEVICE_TELEMETRY_STREAM = "device-telemetry"
 DEVICE_COMMAND_STREAM = "device-commands"
 DEVICE_COMMAND_INDEX = "device-command-index"
 MQTT_BRIDGE_GROUP = "mqtt-bridges"
+FULL_AGENT_COMMAND_MAXLEN = 10_000

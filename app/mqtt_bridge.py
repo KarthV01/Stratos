@@ -40,6 +40,14 @@ from app.mqtt_protocol import (
     ensure_topic_matches_frame,
     parse_topic,
 )
+from app.device_store import (
+    device_command_key,
+    device_frame_key,
+    device_key,
+    device_state_key,
+    latest_telemetry_key,
+)
+from app.tier_payloads import MINIMAL_MAX_PAYLOAD_BYTES
 
 
 HEARTBEAT_SECONDS = int(os.getenv("MQTT_HEARTBEAT_SECONDS", "30"))
@@ -50,22 +58,6 @@ class Publisher(Protocol):
     def publish(
         self, topic: str, payload: bytes | str, qos: int = 0, retain: bool = False
     ): ...
-
-
-def device_key(device_id: str) -> str:
-    return f"device:{device_id}"
-
-
-def device_state_key(device_id: str) -> str:
-    return f"device-state:{device_id}"
-
-
-def device_command_key(command_id: str) -> str:
-    return f"device-command:{command_id}"
-
-
-def device_frame_key(device_id: str, frame: Frame) -> str:
-    return f"device-frame:{device_id}:{frame.frame_type.value}:{frame.sequence}"
 
 
 class DeviceMessageProcessor:
@@ -83,11 +75,33 @@ class DeviceMessageProcessor:
         frame = decode_frame(payload)
         ensure_topic_matches_frame(topic, frame)
         if frame.frame_type is FrameType.HELLO:
-            await self._hello(topic, frame, now)
+            await self._hello(topic, frame, now, len(payload))
             return
 
         if not await self.redis.exists(device_key(topic.device_id)):
             self._error(topic.device_id, frame.sequence, "not-registered", "send-hello")
+            return
+        tier = int(await self.redis.hget(device_key(topic.device_id), "tier"))
+        if tier == 3 and len(payload) > MINIMAL_MAX_PAYLOAD_BYTES:
+            self._error(topic.device_id, frame.sequence, "frame-too-large", "tier-3-limit")
+            return
+        allowed = {
+            2: {
+                FrameType.TELEMETRY,
+                FrameType.STATE,
+                FrameType.ACK,
+                FrameType.DRONE_SNAPSHOT,
+                FrameType.EVENT,
+            },
+            3: {
+                FrameType.TELEMETRY,
+                FrameType.STATE,
+                FrameType.ACK,
+                FrameType.MINIMAL_STATUS,
+            },
+        }
+        if frame.frame_type not in allowed.get(tier, set()):
+            self._error(topic.device_id, frame.sequence, "tier-frame", "not-allowed")
             return
 
         first_delivery = await self.redis.set(
@@ -103,18 +117,45 @@ class DeviceMessageProcessor:
         await self.redis.zadd(DEVICE_INDEX, {topic.device_id: now})
         if frame.frame_type is FrameType.TELEMETRY:
             sensor, value, unit = frame.fields
-            await self.redis.xadd(
-                DEVICE_TELEMETRY_STREAM,
-                {
-                    "device_id": topic.device_id,
-                    "sensor": sensor,
-                    "value": value,
-                    "unit": unit,
-                    "recorded_at": str(now),
-                    "sequence": str(frame.sequence),
-                },
-                maxlen=100_000,
-                approximate=True,
+            await self._telemetry(
+                topic.device_id,
+                tier,
+                "sensor",
+                {"sensor": sensor, "value": value, "unit": unit},
+                frame.sequence,
+                now,
+            )
+        elif frame.frame_type is FrameType.DRONE_SNAPSHOT:
+            names = (
+                "uptime_ms",
+                "latitude_e7",
+                "longitude_e7",
+                "relative_altitude_mm",
+                "velocity_north_cms",
+                "velocity_east_cms",
+                "velocity_down_cms",
+                "heading_cdeg",
+                "voltage_mv",
+                "remaining_pct",
+                "flags",
+            )
+            await self._telemetry(
+                topic.device_id,
+                tier,
+                "flight",
+                dict(zip(names, (int(value) for value in frame.fields))),
+                frame.sequence,
+                now,
+            )
+        elif frame.frame_type is FrameType.MINIMAL_STATUS:
+            flags, battery_pct, link_pct = (int(value) for value in frame.fields)
+            await self._telemetry(
+                topic.device_id,
+                tier,
+                "essential",
+                {"flags": flags, "battery_pct": battery_pct, "link_pct": link_pct},
+                frame.sequence,
+                now,
             )
         elif frame.frame_type is FrameType.STATE:
             key, value = frame.fields
@@ -134,8 +175,13 @@ class DeviceMessageProcessor:
                     },
                 )
                 await self._event(topic.device_id, "command", command_id, status, now)
+        elif frame.frame_type is FrameType.EVENT:
+            code, severity, detail = frame.fields
+            await self._event(topic.device_id, "agent", code, severity, now, detail)
 
-    async def _hello(self, topic: Topic, frame: Frame, now: float) -> None:
+    async def _hello(
+        self, topic: Topic, frame: Frame, now: float, payload_size: int
+    ) -> None:
         board_name, firmware, declared_tier, capabilities = frame.fields
         profile = resolve_board(board_name)
         if profile is None:
@@ -145,6 +191,9 @@ class DeviceMessageProcessor:
         if profile.agent_tier is AgentTier.FULL or int(profile.agent_tier) != tier:
             self._error(topic.device_id, frame.sequence, "tier-mismatch", "not-registered")
             return
+        if tier == 3 and payload_size > MINIMAL_MAX_PAYLOAD_BYTES:
+            self._error(topic.device_id, frame.sequence, "frame-too-large", "tier-3-limit")
+            return
         await self.redis.hset(
             device_key(topic.device_id),
             mapping={
@@ -153,6 +202,7 @@ class DeviceMessageProcessor:
                 "firmware": firmware,
                 "tier": str(tier),
                 "tier_code": profile.tier_code,
+                "transport": "mqtt",
                 "capabilities": capabilities,
                 "availability": "online",
                 "last_seen": str(now),
@@ -178,8 +228,40 @@ class DeviceMessageProcessor:
             )
         await self._event(device_id, "availability", value, "mqtt", now)
 
+    async def _telemetry(
+        self,
+        device_id: str,
+        tier: int,
+        kind: str,
+        values: dict[str, object],
+        sequence: int,
+        now: float,
+    ) -> None:
+        encoded = json.dumps(values, separators=(",", ":"))
+        record = {
+            "device_id": device_id,
+            "tier": str(tier),
+            "kind": kind,
+            "payload": encoded,
+            "recorded_at": str(now),
+            "sequence": str(sequence),
+        }
+        await self.redis.hset(latest_telemetry_key(device_id), mapping=record)
+        await self.redis.xadd(
+            DEVICE_TELEMETRY_STREAM,
+            record,
+            maxlen=100_000,
+            approximate=True,
+        )
+
     async def _event(
-        self, device_id: str, kind: str, name: str, value: str, now: float
+        self,
+        device_id: str,
+        kind: str,
+        name: str,
+        value: str,
+        now: float,
+        detail: str = "-",
     ) -> None:
         await self.redis.xadd(
             DEVICE_EVENT_STREAM,
@@ -188,6 +270,7 @@ class DeviceMessageProcessor:
                 "kind": kind,
                 "name": name,
                 "value": value,
+                "detail": detail,
                 "recorded_at": str(now),
             },
             maxlen=10_000,
