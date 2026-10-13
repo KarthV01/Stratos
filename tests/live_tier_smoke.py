@@ -34,15 +34,19 @@ def request(method: str, path: str, payload: dict | None = None) -> dict:
 
 def main() -> None:
     now_ms = int(time.time() * 1000)
+    suffix = f"{now_ms % 100_000_000:08d}"
+    full_id = f"smoke-full-{suffix}"
+    embedded_id = f"smoke-embedded-{suffix}"
+    minimal_id = f"smoke-minimal-{suffix}"
     hello = {
         "protocol": "sap/1",
         "type": "agent.hello",
-        "agent_id": "drone-full-1",
+        "agent_id": full_id,
         "sequence": 1,
         "sent_at_ms": now_ms,
         "board": "jetson orin nano",
         "firmware": "2.4.1",
-        "boot_id": "boot-smoke",
+        "boot_id": f"boot-{suffix}",
         "capabilities": ["mission.execute"],
         "resources": {
             "cpu_cores": 6,
@@ -57,7 +61,7 @@ def main() -> None:
     telemetry = {
         "protocol": "sap/1",
         "type": "telemetry.snapshot",
-        "agent_id": "drone-full-1",
+        "agent_id": full_id,
         "sequence": 2,
         "sent_at_ms": now_ms + 1,
         "uptime_ms": 88000,
@@ -81,15 +85,15 @@ def main() -> None:
         "sensors": {},
     }
     assert request(
-        "POST", "/api/agent/v1/drone-full-1/telemetry", telemetry
+        "POST", f"/api/agent/v1/{full_id}/telemetry", telemetry
     )["accepted"]
     command = request(
         "POST",
-        "/api/devices/drone-full-1/commands",
+        f"/api/devices/{full_id}/commands",
         {"opcode": "mission.start", "arguments": {"mission_id": "survey-12"}},
     )
     polled = request(
-        "GET", "/api/agent/v1/drone-full-1/commands?wait_seconds=0"
+        "GET", f"/api/agent/v1/{full_id}/commands?wait_seconds=0"
     )
     assert polled["commands"][0]["command_id"] == command["id"]
 
@@ -98,12 +102,12 @@ def main() -> None:
     client.loop_start()
     try:
         client.publish(
-            device_topic("drone-embedded-2", "up", "hello"),
+            device_topic(embedded_id, "up", "hello"),
             encode_hello(1, "esp32-s3", "1.0.0", 2, "flight+power"),
             qos=1,
         ).wait_for_publish(5)
         client.publish(
-            device_topic("drone-embedded-2", "up", "telemetry"),
+            device_topic(embedded_id, "up", "telemetry"),
             encode_drone_snapshot(
                 2,
                 88000,
@@ -121,12 +125,12 @@ def main() -> None:
             qos=0,
         ).wait_for_publish(5)
         client.publish(
-            device_topic("drone-minimal-3", "up", "hello"),
+            device_topic(minimal_id, "up", "hello"),
             encode_hello(1, "uno-r4-wifi", "0.4.0", 3, "base"),
             qos=1,
         ).wait_for_publish(5)
         client.publish(
-            device_topic("drone-minimal-3", "up", "telemetry"),
+            device_topic(minimal_id, "up", "telemetry"),
             encode_minimal_status(2, flags=3, battery_pct=75, link_pct=88),
             qos=0,
         ).wait_for_publish(5)
@@ -138,10 +142,10 @@ def main() -> None:
     while True:
         try:
             embedded = request(
-                "GET", "/api/devices/drone-embedded-2/telemetry/latest"
+                "GET", f"/api/devices/{embedded_id}/telemetry/latest"
             )
             minimal = request(
-                "GET", "/api/devices/drone-minimal-3/telemetry/latest"
+                "GET", f"/api/devices/{minimal_id}/telemetry/latest"
             )
             break
         except urllib.error.HTTPError as exc:
@@ -153,7 +157,7 @@ def main() -> None:
     assert embedded["payload"]["latitude_e7"] == 407128001
     assert minimal["kind"] == "essential"
     assert minimal["payload"]["battery_pct"] == 75
-    assert request("GET", "/api/devices/drone-full-1/telemetry/latest")["tier"] == "1"
+    assert request("GET", f"/api/devices/{full_id}/telemetry/latest")["tier"] == "1"
     print("Tier 1, Tier 2, and Tier 3 cluster paths passed")
 
 
