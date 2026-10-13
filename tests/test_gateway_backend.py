@@ -2,7 +2,12 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.stratos_gateway.backend import GatewayBackend, ProtocolViolation, validate_hello
+from app.stratos_gateway.backend import (
+    AgentSession,
+    GatewayBackend,
+    ProtocolViolation,
+    validate_hello,
+)
 from app.stratos_gateway.generated import agent_pb2
 
 
@@ -59,7 +64,8 @@ class GatewayBackendTests(unittest.TestCase):
             "worker": "another-agent",
             "lease_id": "1-0",
         }
-        session = type("Session", (), {"agent_id": "linux-01"})()
+        self.redis.hget.return_value = "session-1"
+        session = AgentSession("linux-01", "session-1", "tcp")
         result = agent_pb2.TaskResult(
             task_id="task-1",
             lease_id="1-0",
@@ -70,6 +76,27 @@ class GatewayBackendTests(unittest.TestCase):
         response = asyncio.run(self.backend.complete(session, result))
 
         self.assertFalse(response.result_ack.accepted)
+        self.pipeline.execute.assert_not_awaited()
+
+    def test_duplicate_terminal_result_is_idempotent(self) -> None:
+        self.redis.hget.return_value = "session-1"
+        self.redis.hgetall.return_value = {
+            "worker": "linux-01",
+            "lease_id": "1-0",
+            "status": "completed",
+        }
+        session = AgentSession("linux-01", "session-1", "grpc")
+        result = agent_pb2.TaskResult(
+            task_id="task-1",
+            lease_id="1-0",
+            status=agent_pb2.TASK_STATUS_FAILED,
+            error="late duplicate",
+        )
+
+        response = asyncio.run(self.backend.complete(session, result))
+
+        self.assertTrue(response.result_ack.accepted)
+        self.assertEqual("already recorded", response.result_ack.detail)
         self.pipeline.execute.assert_not_awaited()
 
 

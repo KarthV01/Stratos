@@ -55,6 +55,20 @@ class FullAgentTests(unittest.TestCase):
         self.assertEqual(agent_pb2.TASK_STATUS_FAILED, result.status)
         self.assertEqual("boom", result.error)
 
+    def test_client_certificate_requires_a_trust_root(self) -> None:
+        self.agent.config = FullAgentConfig(
+            agent_id="linux-01",
+            board="raspberry-pi/5",
+            agent_version="1.0.0",
+            host="gateway",
+            port=7443,
+            client_cert="agent.pem",
+            client_key="agent-key.pem",
+        )
+
+        with self.assertRaisesRegex(ValueError, "ca_cert"):
+            self.agent._grpc_credentials()
+
 
 if __name__ == "__main__":
     unittest.main()

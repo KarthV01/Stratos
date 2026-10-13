@@ -196,6 +196,8 @@ class GatewayBackend:
     async def complete(
         self, session: AgentSession, result: agent_pb2.TaskResult
     ) -> agent_pb2.GatewayMessage:
+        if await self.redis.hget(agent_key(session.agent_id), "session_id") != session.session_id:
+            raise ProtocolViolation("session-replaced", "a newer session is active")
         if not result.task_id or not result.lease_id:
             raise ProtocolViolation("invalid-result", "task_id and lease_id are required")
         record = await self.redis.hgetall(f"task:{result.task_id}")
@@ -209,6 +211,14 @@ class GatewayBackend:
                     task_id=result.task_id,
                     accepted=False,
                     detail="lease does not belong to this session",
+                )
+            )
+        if record.get("status") in {"completed", "failed"}:
+            return agent_pb2.GatewayMessage(
+                result_ack=agent_pb2.ResultAck(
+                    task_id=result.task_id,
+                    accepted=True,
+                    detail="already recorded",
                 )
             )
         if result.status not in {

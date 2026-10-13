@@ -170,7 +170,13 @@ class FullAgent:
         target = f"{self.config.host}:{self.config.port}"
         credentials = self._grpc_credentials()
         channel = (
-            grpc.aio.secure_channel(target, credentials)
+            grpc.aio.secure_channel(
+                target,
+                credentials,
+                options=(("grpc.ssl_target_name_override", self.config.server_hostname),)
+                if self.config.server_hostname
+                else None,
+            )
             if credentials is not None
             else grpc.aio.insecure_channel(target)
         )
@@ -188,6 +194,8 @@ class FullAgent:
         try:
             responses = agent_pb2_grpc.FullAgentGatewayStub(channel).Connect(requests())
             first = await responses.read()
+            if first is grpc.aio.EOF:
+                raise EOFError("gateway closed before welcome")
             self._accept_gateway_message(first)
             if first.WhichOneof("payload") != "welcome":
                 raise RuntimeError("gateway did not welcome the agent")
@@ -215,6 +223,8 @@ class FullAgent:
 
     def _tcp_ssl_context(self) -> ssl.SSLContext | None:
         if self.config.ca_cert is None:
+            if self.config.client_cert or self.config.client_key:
+                raise ValueError("ca_cert is required when client credentials are set")
             return None
         context = ssl.create_default_context(cafile=self.config.ca_cert)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -226,6 +236,8 @@ class FullAgent:
 
     def _grpc_credentials(self) -> grpc.ChannelCredentials | None:
         if self.config.ca_cert is None:
+            if self.config.client_cert or self.config.client_key:
+                raise ValueError("ca_cert is required when client credentials are set")
             return None
         root = Path(self.config.ca_cert).read_bytes()
         cert = Path(self.config.client_cert).read_bytes() if self.config.client_cert else None
