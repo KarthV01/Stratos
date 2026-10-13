@@ -17,9 +17,9 @@ validated device traffic into the cluster's Redis-backed task system.
 - Command IDs are idempotency keys. A device must remember recently completed
   IDs and acknowledge a redelivered command without repeating its side effect.
 
-An Arduino Uno or ATtiny without an IP radio still needs a Wi-Fi coprocessor or
-gateway. "Tier 3 over Wi-Fi" means the MCU, or its attached network module, can
-maintain an MQTT/TCP connection; SMP/1 cannot add networking to the hardware.
+Boards without their own supported IP path are excluded. Tier 3 contains only
+constrained boards that can maintain an MQTT/TCP connection themselves; SMP/1
+does not use an application gateway to add networking to offline hardware.
 
 ## Topic namespace
 
