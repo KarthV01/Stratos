@@ -16,3 +16,6 @@ DEVICE_TELEMETRY_STREAM = "device-telemetry"
 DEVICE_COMMAND_STREAM = "device-commands"
 DEVICE_COMMAND_INDEX = "device-command-index"
 MQTT_BRIDGE_GROUP = "mqtt-bridges"
+VEHICLE_INDEX = "vehicle-index"
+VEHICLE_EVENT_STREAM = "vehicle-events"
+VEHICLE_TRACK_MAXLEN = int(os.getenv("VEHICLE_TRACK_MAXLEN", "10000"))
