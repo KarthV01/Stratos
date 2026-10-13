@@ -30,3 +30,6 @@ FULL_AGENT_COMMAND_MAXLEN = 10_000
 AGENT_INDEX = "agent-index"
 AGENT_EVENT_STREAM = "agent-events"
 AGENT_GATEWAY_GROUP = "full-agent-gateways"
+VEHICLE_INDEX = "vehicle-index"
+VEHICLE_EVENT_STREAM = "vehicle-events"
+VEHICLE_TRACK_MAXLEN = int(os.getenv("VEHICLE_TRACK_MAXLEN", "10000"))

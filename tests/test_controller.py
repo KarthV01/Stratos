@@ -31,6 +31,7 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual("stratos", info["service"])
         self.assertEqual("/api/tasks", info["tasks"])
         self.assertEqual("/api/agents", info["agents"])
+        self.assertEqual("/api/vehicles", info["vehicles"])
         self.assertEqual("/docs", info["docs"])
 
 

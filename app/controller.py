@@ -38,6 +38,8 @@ from app.device_store import (
 )
 from app.mqtt_protocol import PROTOCOL_NAME as MQTT_PROTOCOL_NAME
 from app.mqtt_protocol import validate_device_id, validate_token
+from app.mavlink.api_models import VehicleTelemetryBatch
+from app.mavlink.store import VehicleTelemetryStore, validate_vehicle_id
 from app.stratos_gateway.backend import agent_key, agent_task_stream, validate_agent_id
 from app.tier_payloads import FullCommand, encode_full_payload
 
@@ -107,6 +109,7 @@ async def service_info() -> dict[str, str]:
         "boards": "/api/boards",
         "devices": "/api/devices",
         "agents": "/api/agents",
+        "vehicles": "/api/vehicles",
         "docs": "/docs",
     }
 
@@ -394,6 +397,65 @@ async def create_device_command(
             )
         await pipe.execute()
     return record
+
+
+@app.post("/api/vehicles/{vehicle_id}/telemetry", status_code=202)
+async def ingest_vehicle_telemetry(
+    vehicle_id: str, body: VehicleTelemetryBatch, request: Request
+) -> dict[str, Any]:
+    try:
+        validate_vehicle_id(vehicle_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if any(sample.vehicle_id != vehicle_id for sample in body.samples):
+        raise HTTPException(status_code=422, detail="Sample vehicle ID does not match path")
+    if any(event.vehicle_id != vehicle_id for event in body.events):
+        raise HTTPException(status_code=422, detail="Event vehicle ID does not match path")
+
+    store = VehicleTelemetryStore(request.app.state.redis)
+    for index, sample in enumerate(body.samples):
+        events = body.events if index == len(body.samples) - 1 else None
+        await store.ingest(sample, events)
+    return {
+        "schema": "flight/1",
+        "vehicle_id": vehicle_id,
+        "accepted": len(body.samples),
+    }
+
+
+@app.get("/api/vehicles")
+async def list_vehicles(
+    request: Request, limit: int = Query(default=100, ge=1, le=500)
+) -> list[dict[str, Any]]:
+    return await VehicleTelemetryStore(request.app.state.redis).list(limit)
+
+
+@app.get("/api/vehicles/{vehicle_id}")
+async def get_vehicle(vehicle_id: str, request: Request) -> dict[str, Any]:
+    try:
+        validate_vehicle_id(vehicle_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    vehicle = await VehicleTelemetryStore(request.app.state.redis).get(vehicle_id)
+    if vehicle is None:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    return vehicle
+
+
+@app.get("/api/vehicles/{vehicle_id}/track")
+async def get_vehicle_track(
+    vehicle_id: str,
+    request: Request,
+    since: float | None = Query(default=None, ge=0),
+    limit: int = Query(default=1000, ge=1, le=10_000),
+) -> list[dict[str, Any]]:
+    try:
+        validate_vehicle_id(vehicle_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await VehicleTelemetryStore(request.app.state.redis).track(
+        vehicle_id, since=since, limit=limit
+    )
 
 
 @app.post("/api/tasks", status_code=202)
