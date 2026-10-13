@@ -8,7 +8,8 @@ validated device traffic into the cluster's Redis-backed task system.
 ## Design constraints
 
 - MQTT 3.1.1 is the compatibility baseline. MQTT 5 clients are allowed.
-- Every application payload is ASCII and at most 256 bytes.
+- Every application payload is ASCII. Tier 2 allows 256 bytes; Tier 3 allows
+  128 bytes after its HELLO is accepted.
 - A minimal implementation needs seven topics and four uplink frame types.
 - No JSON parser, heap allocation, clock, or floating-point implementation is
   required on the device. Decimal telemetry may be constructed as text.
@@ -30,6 +31,7 @@ slashes are forbidden.
 | up | `stratos/v1/devices/{id}/up/hello` | 1 | no | identify after every connection |
 | up | `.../up/telemetry` | 0 | no | numeric sensor sample |
 | up | `.../up/state` | 1 | no | state transition or current value |
+| up | `.../up/event` | 1 | no | Tier 2 alert or fault event |
 | up | `.../up/ack` | 1 | no | command lifecycle acknowledgement |
 | down | `.../down/welcome` | 1 | no | accepted session and heartbeat interval |
 | down | `.../down/command` | 1 | no | idempotent predefined command |
@@ -61,6 +63,9 @@ fields are invalid.
 | `W` | welcome | Unix time, heartbeat seconds | `SMP1|W|1|1791835200|30` |
 | `C` | command | command ID, opcode, argument | `SMP1|C|2|cmd-8f31|relay.set|on` |
 | `E` | error | code, detail token | `SMP1|E|3|bad-frame|field-count` |
+| `D` | telemetry | 11 fixed-point flight fields | `SMP1|D|44|88000|407128001|-740060002|42500|120|-30|5|9120|22400|76|3` |
+| `M` | telemetry | flags, battery %, link % | `SMP1|M|9|3|76|91` |
+| `V` | event | code, severity, detail | `SMP1|V|10|gps.lost|critical|fix-dropped` |
 
 ACK status is one of `accepted`, `running`, `completed`, `failed`, or
 `rejected`. Tier 3 devices may send only the terminal statuses. Opcodes and

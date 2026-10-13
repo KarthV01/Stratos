@@ -4,7 +4,14 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from app.boards import AgentTier, board_directory
 from app.mqtt_bridge import DeviceMessageProcessor, device_command_key, device_key
-from app.mqtt_protocol import device_topic, encode_ack, encode_hello, encode_telemetry
+from app.mqtt_protocol import (
+    device_topic,
+    encode_ack,
+    encode_drone_snapshot,
+    encode_hello,
+    encode_minimal_status,
+    encode_telemetry,
+)
 
 
 class DeviceMessageProcessorTests(unittest.TestCase):
@@ -60,6 +67,7 @@ class DeviceMessageProcessorTests(unittest.TestCase):
 
     def test_telemetry_is_written_to_bounded_stream(self) -> None:
         self.redis.exists.return_value = True
+        self.redis.hget.return_value = "2"
         self.redis.set.return_value = True
         payload = encode_telemetry(7, "soil-moisture", 43.2, "pct")
 
@@ -71,13 +79,14 @@ class DeviceMessageProcessorTests(unittest.TestCase):
 
         stream_call = self.redis.xadd.await_args
         self.assertEqual("device-telemetry", stream_call.args[0])
-        self.assertEqual("43.2", stream_call.args[1]["value"])
+        self.assertIn('"value":"43.2"', stream_call.args[1]["payload"])
+        self.assertEqual("2", stream_call.args[1]["tier"])
         self.assertEqual(100_000, stream_call.kwargs["maxlen"])
 
     def test_ack_updates_existing_command(self) -> None:
         self.redis.exists.return_value = True
         self.redis.set.return_value = True
-        self.redis.hget.return_value = "relay-1"
+        self.redis.hget.side_effect = ["2", "relay-1"]
         payload = encode_ack(9, "cmd-123", "completed")
 
         asyncio.run(
@@ -96,6 +105,7 @@ class DeviceMessageProcessorTests(unittest.TestCase):
 
     def test_duplicate_qos_one_frame_is_ignored(self) -> None:
         self.redis.exists.return_value = True
+        self.redis.hget.return_value = "2"
         self.redis.set.return_value = False
         payload = encode_ack(9, "cmd-123", "completed")
 
@@ -103,7 +113,59 @@ class DeviceMessageProcessorTests(unittest.TestCase):
             self.processor.process(device_topic("relay-1", "up", "ack"), payload)
         )
 
-        self.redis.hget.assert_not_awaited()
+        self.assertEqual(1, self.redis.hget.await_count)
+
+    def test_embedded_drone_snapshot_is_normalized(self) -> None:
+        self.redis.exists.return_value = True
+        self.redis.hget.return_value = "2"
+        self.redis.set.return_value = True
+        payload = encode_drone_snapshot(
+            12, 9000, 407128001, -740060002, 42500, 120, -30, 5, 9120, 22400, 76, 3
+        )
+
+        asyncio.run(
+            self.processor.process(
+                device_topic("drone-2", "up", "telemetry"), payload
+            )
+        )
+
+        latest_calls = [
+            call
+            for call in self.redis.hset.await_args_list
+            if call.args and call.args[0] == "device-telemetry-latest:drone-2"
+        ]
+        self.assertIn('"latitude_e7":407128001', latest_calls[0].kwargs["mapping"]["payload"])
+
+    def test_minimal_agent_cannot_send_embedded_snapshot(self) -> None:
+        self.redis.exists.return_value = True
+        self.redis.hget.return_value = "3"
+        payload = encode_drone_snapshot(
+            12, 9000, 407128001, -740060002, 42500, 120, -30, 5, 9120, 22400, 76, 3
+        )
+
+        asyncio.run(
+            self.processor.process(
+                device_topic("minimal-3", "up", "telemetry"), payload
+            )
+        )
+
+        self.redis.set.assert_not_awaited()
+        self.assertIn(b"tier-frame", self.publisher.publish.call_args.args[1])
+
+    def test_minimal_status_is_accepted(self) -> None:
+        self.redis.exists.return_value = True
+        self.redis.hget.return_value = "3"
+        self.redis.set.return_value = True
+
+        asyncio.run(
+            self.processor.process(
+                device_topic("minimal-3", "up", "telemetry"),
+                encode_minimal_status(4, 3, 76, 91),
+            )
+        )
+
+        stream_call = self.redis.xadd.await_args
+        self.assertEqual("essential", stream_call.args[1]["kind"])
 
 
 if __name__ == "__main__":

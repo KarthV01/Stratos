@@ -4,8 +4,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define SMP1_MAX_FRAME_BYTES 256u
+#ifndef SMP1_MAX_FRAME_BYTES
+#define SMP1_MAX_FRAME_BYTES 128u
+#endif
+
+#ifndef SMP1_MAX_FIELDS
 #define SMP1_MAX_FIELDS 4u
+#endif
 #define SMP1_MAX_DEVICE_ID 64u
 
 typedef enum {
@@ -15,7 +20,10 @@ typedef enum {
     SMP1_ACK = 'A',
     SMP1_WELCOME = 'W',
     SMP1_COMMAND = 'C',
-    SMP1_ERROR = 'E'
+    SMP1_ERROR = 'E',
+    SMP1_DRONE_SNAPSHOT = 'D',
+    SMP1_MINIMAL_STATUS = 'M',
+    SMP1_EVENT = 'V'
 } smp1_type_t;
 
 typedef struct {
