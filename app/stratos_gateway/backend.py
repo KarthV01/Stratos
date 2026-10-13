@@ -52,6 +52,12 @@ def agent_task_stream(agent_id: str) -> str:
     return f"agent-tasks:{agent_id}"
 
 
+def validate_agent_id(agent_id: str) -> str:
+    if not _ID.fullmatch(agent_id):
+        raise ValueError("agent_id is invalid")
+    return agent_id
+
+
 def validate_hello(hello: agent_pb2.AgentHello, expected_token: str | None) -> None:
     if hello.protocol_version != PROTOCOL_VERSION:
         raise ProtocolViolation("unsupported-version", f"expected {PROTOCOL_VERSION}")
@@ -63,6 +69,8 @@ def validate_hello(hello: agent_pb2.AgentHello, expected_token: str | None) -> N
         not _CAPABILITY.fullmatch(value) for value in hello.capabilities
     ):
         raise ProtocolViolation("invalid-capabilities", "capabilities are invalid")
+    if hello.max_concurrent_tasks > 64:
+        raise ProtocolViolation("invalid-capacity", "max_concurrent_tasks must be at most 64")
     profile = resolve_board(hello.board)
     if profile is None:
         raise ProtocolViolation("unknown-board", "board is not in the directory")
