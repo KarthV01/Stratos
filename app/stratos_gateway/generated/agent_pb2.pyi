@@ -17,28 +17,32 @@ TASK_STATUS_SUCCEEDED: TaskStatus
 TASK_STATUS_FAILED: TaskStatus
 
 class AgentHello(_message.Message):
-    __slots__ = ("protocol_version", "agent_id", "board", "agent_version", "capabilities", "token")
+    __slots__ = ("protocol_version", "agent_id", "board", "agent_version", "capabilities", "token", "max_concurrent_tasks")
     PROTOCOL_VERSION_FIELD_NUMBER: _ClassVar[int]
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     BOARD_FIELD_NUMBER: _ClassVar[int]
     AGENT_VERSION_FIELD_NUMBER: _ClassVar[int]
     CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
     TOKEN_FIELD_NUMBER: _ClassVar[int]
+    MAX_CONCURRENT_TASKS_FIELD_NUMBER: _ClassVar[int]
     protocol_version: str
     agent_id: str
     board: str
     agent_version: str
     capabilities: _containers.RepeatedScalarFieldContainer[str]
     token: str
-    def __init__(self, protocol_version: _Optional[str] = ..., agent_id: _Optional[str] = ..., board: _Optional[str] = ..., agent_version: _Optional[str] = ..., capabilities: _Optional[_Iterable[str]] = ..., token: _Optional[str] = ...) -> None: ...
+    max_concurrent_tasks: int
+    def __init__(self, protocol_version: _Optional[str] = ..., agent_id: _Optional[str] = ..., board: _Optional[str] = ..., agent_version: _Optional[str] = ..., capabilities: _Optional[_Iterable[str]] = ..., token: _Optional[str] = ..., max_concurrent_tasks: _Optional[int] = ...) -> None: ...
 
 class Heartbeat(_message.Message):
-    __slots__ = ("sent_at_unix_ms", "running_task_ids")
+    __slots__ = ("sent_at_unix_ms", "running_task_ids", "available_task_slots")
     SENT_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
     RUNNING_TASK_IDS_FIELD_NUMBER: _ClassVar[int]
+    AVAILABLE_TASK_SLOTS_FIELD_NUMBER: _ClassVar[int]
     sent_at_unix_ms: int
     running_task_ids: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, sent_at_unix_ms: _Optional[int] = ..., running_task_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+    available_task_slots: int
+    def __init__(self, sent_at_unix_ms: _Optional[int] = ..., running_task_ids: _Optional[_Iterable[str]] = ..., available_task_slots: _Optional[int] = ...) -> None: ...
 
 class TaskResult(_message.Message):
     __slots__ = ("task_id", "lease_id", "status", "result_json", "error")

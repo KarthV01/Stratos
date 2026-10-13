@@ -21,6 +21,7 @@ from app.boards import (
     tier_catalog,
 )
 from app.config import (
+    AGENT_INDEX,
     DEVICE_COMMAND_INDEX,
     DEVICE_COMMAND_STREAM,
     DEVICE_INDEX,
@@ -37,6 +38,7 @@ from app.device_store import (
 )
 from app.mqtt_protocol import PROTOCOL_NAME as MQTT_PROTOCOL_NAME
 from app.mqtt_protocol import validate_device_id, validate_token
+from app.stratos_gateway.backend import agent_key, agent_task_stream, validate_agent_id
 from app.tier_payloads import FullCommand, encode_full_payload
 
 
@@ -104,8 +106,73 @@ async def service_info() -> dict[str, str]:
         "tasks": "/api/tasks",
         "boards": "/api/boards",
         "devices": "/api/devices",
+        "agents": "/api/agents",
         "docs": "/docs",
     }
+
+
+@app.get("/api/agents")
+async def list_agents(
+    request: Request, limit: int = Query(default=100, ge=1, le=500)
+) -> list[dict[str, Any]]:
+    redis: Redis = request.app.state.redis
+    ids = await redis.zrevrange(AGENT_INDEX, 0, limit - 1)
+    if not ids:
+        return []
+    async with redis.pipeline(transaction=False) as pipe:
+        for agent_id in ids:
+            pipe.hgetall(agent_key(agent_id))
+        agents = await pipe.execute()
+    return [agent for agent in agents if agent]
+
+
+@app.get("/api/agents/{agent_id}")
+async def get_agent(agent_id: str, request: Request) -> dict[str, Any]:
+    try:
+        validate_agent_id(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    agent = await request.app.state.redis.hgetall(agent_key(agent_id))
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return agent
+
+
+@app.post("/api/agents/{agent_id}/tasks", status_code=202)
+async def create_agent_task(
+    agent_id: str, body: TaskRequest, request: Request
+) -> dict[str, Any]:
+    try:
+        validate_agent_id(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    redis: Redis = request.app.state.redis
+    if not await redis.exists(agent_key(agent_id)):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    task_id = str(uuid4())
+    now = time.time()
+    payload = body.model_dump()
+    record = {
+        "id": task_id,
+        "status": "queued",
+        "worker": agent_id,
+        "payload": json.dumps(payload),
+        "created_at": str(now),
+        "updated_at": str(now),
+    }
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.hset(task_key(task_id), mapping=record)
+        pipe.zadd(TASK_INDEX, {task_id: now})
+        pipe.xadd(
+            agent_task_stream(agent_id),
+            {"task_id": task_id, "payload": record["payload"]},
+        )
+        pipe.xadd(
+            EVENT_STREAM,
+            {"task_id": task_id, "status": "queued", "worker": agent_id},
+        )
+        await pipe.execute()
+    return decode_task(record)
 
 
 @app.get("/health")

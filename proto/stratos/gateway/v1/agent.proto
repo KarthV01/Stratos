@@ -13,11 +13,13 @@ message AgentHello {
   string agent_version = 4;
   repeated string capabilities = 5;
   string token = 6;
+  uint32 max_concurrent_tasks = 7;
 }
 
 message Heartbeat {
   int64 sent_at_unix_ms = 1;
   repeated string running_task_ids = 2;
+  uint32 available_task_slots = 3;
 }
 
 enum TaskStatus {
