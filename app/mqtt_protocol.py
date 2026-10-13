@@ -22,9 +22,12 @@ class FrameType(str, Enum):
     WELCOME = "W"
     COMMAND = "C"
     ERROR = "E"
+    DRONE_SNAPSHOT = "D"
+    MINIMAL_STATUS = "M"
+    EVENT = "V"
 
 
-UPLINK_CHANNELS = frozenset({"hello", "telemetry", "state", "ack"})
+UPLINK_CHANNELS = frozenset({"hello", "telemetry", "state", "event", "ack"})
 DOWNLINK_CHANNELS = frozenset({"welcome", "command", "error"})
 ALL_CHANNELS = UPLINK_CHANNELS | DOWNLINK_CHANNELS | {"availability"}
 
@@ -36,11 +39,17 @@ FRAME_CHANNELS = {
     FrameType.WELCOME: "welcome",
     FrameType.COMMAND: "command",
     FrameType.ERROR: "error",
+    FrameType.DRONE_SNAPSHOT: "telemetry",
+    FrameType.MINIMAL_STATUS: "telemetry",
+    FrameType.EVENT: "event",
 }
 
-_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,63}$")
+_TOKEN = re.compile(
+    r"^(?:[A-Za-z0-9][A-Za-z0-9._:/+-]{0,63}|-[0-9]+(?:\.[0-9]+)?|-)$"
+)
 _DEVICE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 _NUMBER = re.compile(r"^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$")
+_INTEGER = re.compile(r"^-?(?:0|[1-9][0-9]*)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +147,9 @@ def _validate_shape(frame_type: FrameType, fields: tuple[str, ...]) -> None:
         FrameType.WELCOME: 2,
         FrameType.COMMAND: 3,
         FrameType.ERROR: 2,
+        FrameType.DRONE_SNAPSHOT: 11,
+        FrameType.MINIMAL_STATUS: 3,
+        FrameType.EVENT: 3,
     }[frame_type]
     if len(fields) != expected:
         raise ValueError(f"{frame_type.name} frame requires {expected} fields")
@@ -153,6 +165,37 @@ def _validate_shape(frame_type: FrameType, fields: tuple[str, ...]) -> None:
         "rejected",
     }:
         raise ValueError("Invalid ACK status")
+    integer_fields = {
+        FrameType.DRONE_SNAPSHOT: fields,
+        FrameType.MINIMAL_STATUS: fields,
+    }.get(frame_type, ())
+    if any(not _INTEGER.fullmatch(value) for value in integer_fields):
+        raise ValueError(f"{frame_type.name} integer field is invalid")
+    if frame_type is FrameType.DRONE_SNAPSHOT:
+        values = tuple(int(value) for value in fields)
+        if not 0 <= values[0]:
+            raise ValueError("DRONE_SNAPSHOT uptime cannot be negative")
+        if not -900_000_000 <= values[1] <= 900_000_000:
+            raise ValueError("DRONE_SNAPSHOT latitude is out of range")
+        if not -1_800_000_000 <= values[2] <= 1_800_000_000:
+            raise ValueError("DRONE_SNAPSHOT longitude is out of range")
+        if not 0 <= values[7] < 36_000:
+            raise ValueError("DRONE_SNAPSHOT heading is out of range")
+        if not 0 <= values[8] <= 100_000 or not 0 <= values[9] <= 100:
+            raise ValueError("DRONE_SNAPSHOT power field is out of range")
+        if not 0 <= values[10] <= 65_535:
+            raise ValueError("DRONE_SNAPSHOT flags are out of range")
+    if frame_type is FrameType.MINIMAL_STATUS:
+        for value in fields[1:]:
+            if not 0 <= int(value) <= 100:
+                raise ValueError("MINIMAL_STATUS percentages must be 0 to 100")
+    if frame_type is FrameType.EVENT and fields[1] not in {
+        "info",
+        "warning",
+        "error",
+        "critical",
+    }:
+        raise ValueError("Invalid EVENT severity")
 
 
 def ensure_topic_matches_frame(topic: Topic, frame: Frame) -> None:
@@ -201,3 +244,57 @@ def encode_command(
 
 def encode_error(sequence: int, code: str, detail: str) -> bytes:
     return encode_frame(FrameType.ERROR, sequence, code, detail)
+
+
+def encode_drone_snapshot(
+    sequence: int,
+    uptime_ms: int,
+    latitude_e7: int,
+    longitude_e7: int,
+    relative_altitude_mm: int,
+    velocity_north_cms: int,
+    velocity_east_cms: int,
+    velocity_down_cms: int,
+    heading_cdeg: int,
+    voltage_mv: int,
+    remaining_pct: int,
+    flags: int,
+) -> bytes:
+    """Encode the Tier 2 fixed-point flight snapshot derived from MAVLink state."""
+    values = (
+        uptime_ms,
+        latitude_e7,
+        longitude_e7,
+        relative_altitude_mm,
+        velocity_north_cms,
+        velocity_east_cms,
+        velocity_down_cms,
+        heading_cdeg,
+        voltage_mv,
+        remaining_pct,
+        flags,
+    )
+    payload = encode_frame(FrameType.DRONE_SNAPSHOT, sequence, *(str(v) for v in values))
+    decode_frame(payload)
+    return payload
+
+
+def encode_minimal_status(
+    sequence: int, flags: int, battery_pct: int, link_pct: int
+) -> bytes:
+    """Encode the Tier 3 essential status without timestamps or floating point."""
+    payload = encode_frame(
+        FrameType.MINIMAL_STATUS,
+        sequence,
+        str(flags),
+        str(battery_pct),
+        str(link_pct),
+    )
+    decode_frame(payload)
+    return payload
+
+
+def encode_event(sequence: int, code: str, severity: str, detail: str) -> bytes:
+    payload = encode_frame(FrameType.EVENT, sequence, code, severity, detail)
+    decode_frame(payload)
+    return payload
