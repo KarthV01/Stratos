@@ -112,6 +112,12 @@ $task = Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/tasks `
 Invoke-RestMethod -Uri "http://localhost:8000/api/tasks/$($task.id)"
 ```
 
+Physical agents on the trusted Minikube development LAN can connect without a
+port-forward. Tier 1 agents use SAP/1 at `http://<minikube-ip>:30800`; Tier 2
+and Tier 3 agents use SMP/1 MQTT at `<minikube-ip>:31883`. These NodePorts are
+development-only and require TLS plus per-device authentication before use on
+an untrusted network.
+
 Inspect logs and rollout state:
 
 ```powershell

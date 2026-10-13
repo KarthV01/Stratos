@@ -97,6 +97,26 @@ Safety events and command acknowledgements use QoS 1. High-rate snapshots and
 scalar samples use QoS 0 because freshness matters more than retransmitting old
 vehicle state. Devices reduce rate before buffering when the link degrades.
 
+## Development cluster addresses
+
+After `kubectl apply -k k8s`, run `minikube ip` and use the returned address:
+
+| Tier | Development endpoint | Protocol |
+| --- | --- | --- |
+| 1 | `http://MINIKUBE_IP:30800/api/agent/v1` | SAP/1 HTTP/JSON |
+| 2 | `mqtt://MINIKUBE_IP:31883` | SMP/1 MQTT 3.1.1 |
+| 3 | `mqtt://MINIKUBE_IP:31883` | SMP/1 MQTT 3.1.1 minimal subset |
+
+Compose exposes the same endpoints on host ports `8000` and `1883`. These
+cleartext, anonymous development listeners must stay on a trusted lab network.
+A production deployment terminates HTTPS/TLS at an ingress or load balancer,
+uses per-agent credentials, and applies broker topic ACLs.
+
+Tier 1 startup calls `POST /register`, sends snapshots to
+`POST /{agent_id}/telemetry`, and long-polls `GET /{agent_id}/commands`. Tier 2
+and Tier 3 startup subscribe to their own `down/#` namespace, publish HELLO,
+then publish their class-specific telemetry frame.
+
 ## Ground-server contract
 
 All three tiers produce the same cluster concepts: current agent identity,
