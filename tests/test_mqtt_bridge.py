@@ -3,8 +3,15 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 from app.boards import AgentTier, board_directory
-from app.mqtt_bridge import DeviceMessageProcessor, device_command_key, device_key
-from app.mqtt_protocol import device_topic, encode_ack, encode_hello, encode_telemetry
+from app.mqtt_bridge import MqttBridge, DeviceMessageProcessor, device_command_key, device_key
+from app.mqtt_protocol import (
+    device_topic,
+    encode_ack,
+    encode_hello,
+    encode_map_snapshot,
+    encode_telemetry,
+    encode_vehicle,
+)
 
 
 class DeviceMessageProcessorTests(unittest.TestCase):
@@ -104,6 +111,134 @@ class DeviceMessageProcessorTests(unittest.TestCase):
         )
 
         self.redis.hget.assert_not_awaited()
+
+    def test_vehicle_binding_records_mavlink_identity(self) -> None:
+        self.redis.exists.return_value = True
+        self.redis.set.return_value = True
+        payload = encode_vehicle(2, "aircraft-01", 1, 191, "px4", "quadrotor", 2)
+
+        asyncio.run(
+            self.processor.process(device_topic("companion-01", "up", "state"), payload)
+        )
+
+        mappings = [call.kwargs.get("mapping") for call in self.redis.hset.await_args_list]
+        binding = next(mapping for mapping in mappings if mapping and "vehicle_id" in mapping)
+        self.assertEqual("aircraft-01", binding["vehicle_id"])
+        self.assertEqual("191", binding["mav_component_id"])
+
+    def test_map_snapshot_is_normalized_into_shared_vehicle_store(self) -> None:
+        self.redis.exists.return_value = True
+        self.redis.hgetall.return_value = {
+            "tier": "2",
+            "vehicle_id": "aircraft-01",
+            "mav_system_id": "1",
+            "mav_component_id": "191",
+            "mav_autopilot": "px4",
+            "mav_vehicle_type": "quadrotor",
+            "mavlink_version": "2",
+        }
+        payload = encode_map_snapshot(
+            3,
+            boot_ms=5000,
+            latitude_e7=401234567,
+            longitude_e7=-731234567,
+            altitude_msl_mm=12_345,
+            relative_altitude_mm=2_345,
+            ground_speed_cms=500,
+            heading_cdeg=9000,
+            gps_fix_type=3,
+            satellites_visible=12,
+            battery_remaining_percent=87,
+            flags=25,
+        )
+        store = AsyncMock()
+        with patch("app.mqtt_bridge.VehicleTelemetryStore", return_value=store):
+            with patch("app.mqtt_bridge.time.time", return_value=1000.5):
+                asyncio.run(
+                    self.processor.process(
+                        device_topic("companion-01", "up", "telemetry"), payload
+                    )
+                )
+
+        snapshot = store.ingest.await_args.args[0]
+        self.assertEqual("aircraft-01", snapshot.vehicle_id)
+        self.assertEqual(401234567, snapshot.position.latitude_e7)
+        self.assertEqual(87, snapshot.battery.remaining_percent)
+        self.assertTrue(snapshot.state.armed)
+
+    def test_map_requires_vehicle_binding(self) -> None:
+        self.redis.exists.return_value = True
+        self.redis.hgetall.return_value = {"tier": "3"}
+        payload = encode_map_snapshot(
+            3,
+            boot_ms=None,
+            latitude_e7=None,
+            longitude_e7=None,
+            altitude_msl_mm=None,
+            relative_altitude_mm=None,
+            ground_speed_cms=None,
+            heading_cdeg=None,
+            gps_fix_type=None,
+            satellites_visible=None,
+            battery_remaining_percent=None,
+            flags=0,
+        )
+        asyncio.run(
+            self.processor.process(
+                device_topic("companion-01", "up", "telemetry"), payload
+            )
+        )
+        self.assertIn(b"vehicle-required", self.publisher.publish.call_args.args[1])
+
+    def test_tier_three_map_rate_is_limited_to_one_hz(self) -> None:
+        self.redis.exists.return_value = True
+        self.redis.hgetall.return_value = {
+            "tier": "3",
+            "vehicle_id": "aircraft-01",
+            "mav_system_id": "1",
+            "mav_component_id": "191",
+            "mav_autopilot": "ardupilot",
+            "mav_vehicle_type": "quadrotor",
+            "mavlink_version": "2",
+            "last_map_at": "1000.0",
+        }
+        payload = encode_map_snapshot(
+            4,
+            boot_ms=5500,
+            latitude_e7=401234567,
+            longitude_e7=-731234567,
+            altitude_msl_mm=12_345,
+            relative_altitude_mm=2_345,
+            ground_speed_cms=500,
+            heading_cdeg=9000,
+            gps_fix_type=3,
+            satellites_visible=12,
+            battery_remaining_percent=87,
+            flags=25,
+        )
+        store = AsyncMock()
+        with patch("app.mqtt_bridge.VehicleTelemetryStore", return_value=store):
+            with patch("app.mqtt_bridge.time.time", return_value=1000.5):
+                asyncio.run(
+                    self.processor.process(
+                        device_topic("companion-01", "up", "telemetry"), payload
+                    )
+                )
+        store.ingest.assert_not_awaited()
+
+
+class MqttBridgeQueueTests(unittest.TestCase):
+    def test_only_latest_map_is_retained_per_device(self) -> None:
+        async def exercise() -> None:
+            with patch("app.mqtt_bridge.mqtt.Client"):
+                bridge = MqttBridge(AsyncMock())
+            topic = device_topic("companion-01", "up", "telemetry")
+            bridge._enqueue_message((topic, b"SMP1|M|1|old"))
+            bridge._enqueue_message((topic, b"SMP1|M|2|new"))
+            self.assertEqual((topic, b"SMP1|M|2|new"), bridge.latest_maps[topic])
+            self.assertTrue(bridge.maps_ready.is_set())
+
+        asyncio.run(exercise())
 
 
 if __name__ == "__main__":

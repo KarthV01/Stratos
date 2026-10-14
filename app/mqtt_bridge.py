@@ -40,6 +40,16 @@ from app.mqtt_protocol import (
     ensure_topic_matches_frame,
     parse_topic,
 )
+from app.mavlink.models import (
+    BatteryHealth,
+    FlightSnapshotV1,
+    GlobalPosition,
+    GpsHealth,
+    LinkState,
+    VehicleIdentity,
+    VehicleState,
+)
+from app.mavlink.store import VehicleTelemetryStore
 
 
 HEARTBEAT_SECONDS = int(os.getenv("MQTT_HEARTBEAT_SECONDS", "30"))
@@ -90,11 +100,12 @@ class DeviceMessageProcessor:
             self._error(topic.device_id, frame.sequence, "not-registered", "send-hello")
             return
 
-        first_delivery = await self.redis.set(
-            device_frame_key(topic.device_id, frame), "1", ex=86_400, nx=True
-        )
-        if not first_delivery:
-            return
+        if frame.frame_type not in {FrameType.TELEMETRY, FrameType.MAP}:
+            first_delivery = await self.redis.set(
+                device_frame_key(topic.device_id, frame), "1", ex=86_400, nx=True
+            )
+            if not first_delivery:
+                return
 
         await self.redis.hset(
             device_key(topic.device_id),
@@ -134,6 +145,10 @@ class DeviceMessageProcessor:
                     },
                 )
                 await self._event(topic.device_id, "command", command_id, status, now)
+        elif frame.frame_type is FrameType.VEHICLE:
+            await self._vehicle(topic.device_id, frame, now)
+        elif frame.frame_type is FrameType.MAP:
+            await self._map_snapshot(topic.device_id, frame, now)
 
     async def _hello(self, topic: Topic, frame: Frame, now: float) -> None:
         board_name, firmware, declared_tier, capabilities = frame.fields
@@ -178,6 +193,90 @@ class DeviceMessageProcessor:
             )
         await self._event(device_id, "availability", value, "mqtt", now)
 
+    async def _vehicle(self, device_id: str, frame: Frame, now: float) -> None:
+        vehicle_id, system_id, component_id, autopilot, vehicle_type, version = frame.fields
+        await self.redis.hset(
+            device_key(device_id),
+            mapping={
+                "vehicle_id": vehicle_id,
+                "mav_system_id": system_id,
+                "mav_component_id": component_id,
+                "mav_autopilot": autopilot,
+                "mav_vehicle_type": vehicle_type,
+                "mavlink_version": version,
+                "vehicle_bound_at": str(now),
+            },
+        )
+        await self._event(device_id, "vehicle", vehicle_id, "bound", now)
+
+    async def _map_snapshot(self, device_id: str, frame: Frame, now: float) -> None:
+        device = await self.redis.hgetall(device_key(device_id))
+        vehicle_id = device.get("vehicle_id")
+        if not vehicle_id:
+            self._error(device_id, frame.sequence, "vehicle-required", "send-vehicle")
+            return
+
+        tier = int(device["tier"])
+        minimum_interval = 0.5 if tier == 2 else 1.0
+        previous_at = float(device.get("last_map_at", "0"))
+        if now - previous_at < minimum_interval:
+            return
+
+        values = [None if value == "na" else int(value) for value in frame.fields[:10]]
+        (
+            boot_ms,
+            latitude_e7,
+            longitude_e7,
+            altitude_msl_mm,
+            relative_altitude_mm,
+            ground_speed_cms,
+            heading_cdeg,
+            gps_fix_type,
+            satellites_visible,
+            battery_remaining,
+        ) = values
+        flags = int(frame.fields[10])
+        position_valid = bool(flags & 8)
+        battery_valid = bool(flags & 16)
+        snapshot = FlightSnapshotV1(
+            vehicle_id=vehicle_id,
+            device_id=device_id,
+            received_at=now,
+            identity=VehicleIdentity(
+                system_id=int(device["mav_system_id"]),
+                component_id=int(device["mav_component_id"]),
+                autopilot=device["mav_autopilot"],
+                vehicle_type=device["mav_vehicle_type"],
+                mavlink_version=int(device["mavlink_version"]),
+            ),
+            position=GlobalPosition(
+                boot_ms=boot_ms,
+                latitude_e7=latitude_e7 if position_valid else None,
+                longitude_e7=longitude_e7 if position_valid else None,
+                altitude_msl_mm=altitude_msl_mm if position_valid else None,
+                relative_altitude_mm=(
+                    relative_altitude_mm if position_valid else None
+                ),
+                ground_speed_cms=ground_speed_cms if position_valid else None,
+                heading_cdeg=heading_cdeg if position_valid else None,
+            ),
+            gps=GpsHealth(
+                fix_type=gps_fix_type,
+                satellites_visible=satellites_visible,
+            ),
+            battery=BatteryHealth(
+                remaining_percent=battery_remaining if battery_valid else None
+            ),
+            state=VehicleState(
+                armed=bool(flags & 1),
+                landed_state=1 if flags & 2 else 2,
+                failsafe=bool(flags & 4),
+            ),
+            link=LinkState(connected=True, last_heartbeat_at=now),
+        )
+        await VehicleTelemetryStore(self.redis).ingest(snapshot)
+        await self.redis.hset(device_key(device_id), "last_map_at", str(now))
+
     async def _event(
         self, device_id: str, kind: str, name: str, value: str, now: float
     ) -> None:
@@ -207,6 +306,8 @@ class MqttBridge:
         self.redis = redis
         self.loop = asyncio.get_running_loop()
         self.messages: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue(maxsize=1000)
+        self.latest_maps: dict[str, tuple[str, bytes]] = {}
+        self.maps_ready = asyncio.Event()
         self.client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             client_id=BRIDGE_ID,
@@ -233,6 +334,10 @@ class MqttBridge:
         self.loop.call_soon_threadsafe(self._enqueue_message, item)
 
     def _enqueue_message(self, item: tuple[str, bytes]) -> None:
+        if item[1].startswith(b"SMP1|M|"):
+            self.latest_maps[item[0]] = item
+            self.maps_ready.set()
+            return
         try:
             self.messages.put_nowait(item)
         except asyncio.QueueFull:
@@ -249,6 +354,20 @@ class MqttBridge:
                 traceback.print_exc()
             finally:
                 self.messages.task_done()
+
+    async def consume_latest_maps(self) -> None:
+        while True:
+            await self.maps_ready.wait()
+            items = list(self.latest_maps.values())
+            self.latest_maps.clear()
+            self.maps_ready.clear()
+            for topic, payload in items:
+                try:
+                    await self.processor.process(topic, payload)
+                except ValueError as exc:
+                    print(f"[mqtt-bridge] rejected {topic}: {exc}", flush=True)
+                except Exception:
+                    traceback.print_exc()
 
     async def dispatch_commands(self) -> None:
         while True:
@@ -292,7 +411,9 @@ class MqttBridge:
         self.client.connect_async(MQTT_HOST, MQTT_PORT, keepalive=60)
         self.client.loop_start()
         try:
-            await asyncio.gather(self.consume_mqtt(), self.dispatch_commands())
+            await asyncio.gather(
+                self.consume_mqtt(), self.consume_latest_maps(), self.dispatch_commands()
+            )
         finally:
             self.client.disconnect()
             self.client.loop_stop()

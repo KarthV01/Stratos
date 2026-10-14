@@ -22,6 +22,8 @@ class FrameType(str, Enum):
     WELCOME = "W"
     COMMAND = "C"
     ERROR = "E"
+    VEHICLE = "V"
+    MAP = "M"
 
 
 UPLINK_CHANNELS = frozenset({"hello", "telemetry", "state", "ack"})
@@ -36,11 +38,14 @@ FRAME_CHANNELS = {
     FrameType.WELCOME: "welcome",
     FrameType.COMMAND: "command",
     FrameType.ERROR: "error",
+    FrameType.VEHICLE: "state",
+    FrameType.MAP: "telemetry",
 }
 
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,63}$")
 _DEVICE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 _NUMBER = re.compile(r"^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$")
+_INTEGER = re.compile(r"^-?(?:0|[1-9][0-9]*)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +69,7 @@ def validate_device_id(device_id: str) -> str:
 
 
 def validate_token(value: str, *, name: str = "field") -> str:
-    if not _TOKEN.fullmatch(value):
+    if not _TOKEN.fullmatch(value) and not _NUMBER.fullmatch(value):
         raise ValueError(f"Invalid {name}")
     return value
 
@@ -138,6 +143,8 @@ def _validate_shape(frame_type: FrameType, fields: tuple[str, ...]) -> None:
         FrameType.WELCOME: 2,
         FrameType.COMMAND: 3,
         FrameType.ERROR: 2,
+        FrameType.VEHICLE: 6,
+        FrameType.MAP: 11,
     }[frame_type]
     if len(fields) != expected:
         raise ValueError(f"{frame_type.name} frame requires {expected} fields")
@@ -153,6 +160,18 @@ def _validate_shape(frame_type: FrameType, fields: tuple[str, ...]) -> None:
         "rejected",
     }:
         raise ValueError("Invalid ACK status")
+    if frame_type is FrameType.VEHICLE:
+        validate_device_id(fields[0])
+        if not 1 <= int(fields[1]) <= 255 or not 1 <= int(fields[2]) <= 255:
+            raise ValueError("MAVLink system and component IDs must be 1 to 255")
+        if fields[5] not in {"1", "2"}:
+            raise ValueError("MAVLink version must be 1 or 2")
+    if frame_type is FrameType.MAP:
+        for value in fields[:10]:
+            if value != "na" and not _INTEGER.fullmatch(value):
+                raise ValueError("MAP fields must be integers or na")
+        if not fields[10].isdigit() or not 0 <= int(fields[10]) <= 31:
+            raise ValueError("MAP flags must be an unsigned integer")
 
 
 def ensure_topic_matches_frame(topic: Topic, frame: Frame) -> None:
@@ -201,3 +220,63 @@ def encode_command(
 
 def encode_error(sequence: int, code: str, detail: str) -> bytes:
     return encode_frame(FrameType.ERROR, sequence, code, detail)
+
+
+def encode_vehicle(
+    sequence: int,
+    vehicle_id: str,
+    system_id: int,
+    component_id: int,
+    autopilot: str,
+    vehicle_type: str,
+    mavlink_version: int,
+) -> bytes:
+    payload = encode_frame(
+        FrameType.VEHICLE,
+        sequence,
+        validate_device_id(vehicle_id),
+        str(system_id),
+        str(component_id),
+        autopilot,
+        vehicle_type,
+        str(mavlink_version),
+    )
+    decode_frame(payload)
+    return payload
+
+
+def encode_map_snapshot(
+    sequence: int,
+    *,
+    boot_ms: int | None,
+    latitude_e7: int | None,
+    longitude_e7: int | None,
+    altitude_msl_mm: int | None,
+    relative_altitude_mm: int | None,
+    ground_speed_cms: int | None,
+    heading_cdeg: int | None,
+    gps_fix_type: int | None,
+    satellites_visible: int | None,
+    battery_remaining_percent: int | None,
+    flags: int,
+) -> bytes:
+    def value(item: int | None) -> str:
+        return "na" if item is None else str(item)
+
+    payload = encode_frame(
+        FrameType.MAP,
+        sequence,
+        value(boot_ms),
+        value(latitude_e7),
+        value(longitude_e7),
+        value(altitude_msl_mm),
+        value(relative_altitude_mm),
+        value(ground_speed_cms),
+        value(heading_cdeg),
+        value(gps_fix_type),
+        value(satellites_visible),
+        value(battery_remaining_percent),
+        str(flags),
+    )
+    decode_frame(payload)
+    return payload
