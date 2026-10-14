@@ -396,4 +396,3 @@ class MavlinkTelemetryAccumulator:
             self.position.heading_cdeg = None
         self.battery.remaining_percent = _optional(int(message.battery), -1)
         self.state.custom_mode = int(message.custom_mode)
-
