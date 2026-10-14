@@ -61,6 +61,19 @@ fields are invalid.
 | `W` | welcome | Unix time, heartbeat seconds | `SMP1|W|1|1791835200|30` |
 | `C` | command | command ID, opcode, argument | `SMP1|C|2|cmd-8f31|relay.set|on` |
 | `E` | error | code, detail token | `SMP1|E|3|bad-frame|field-count` |
+| `V` | state | vehicle ID, MAVLink system ID, component ID, autopilot, vehicle type, MAVLink version | `SMP1|V|5|aircraft-01|1|1|px4|quadrotor|2` |
+| `M` | telemetry | boot ms, latitude E7, longitude E7, MSL mm, relative-altitude mm, ground speed cm/s, heading centidegrees, GPS fix, satellites, battery percent, flags | `SMP1|M|6|5000|401234567|-731234567|12345000|2345000|500|9000|3|12|87|57` |
+
+`V` is the provisioned binding between a companion and a vehicle; MAVLink's
+8-bit system ID is not used as the fleet identifier. Send it at QoS 1 after
+MAVLink identity is detected. `M` is a compact, integer-unit fleet sample at
+QoS 0; use `na` for unavailable numeric values. The `flags` integer uses bits
+0-5 for armed, landed, failsafe, position-valid, battery-valid, and a fresh
+flight-controller heartbeat respectively. A fresh-heartbeat bit means the
+embedded parser received `HEARTBEAT` (or `HIGH_LATENCY2`) within five seconds;
+it is separate from MQTT availability/LWT. The bridge rate-limits map samples
+to 2 Hz for Tier 2 and 1 Hz for Tier 3 and keeps only the latest queued map per
+device.
 
 ACK status is one of `accepted`, `running`, `completed`, `failed`, or
 `rejected`. Tier 3 devices may send only the terminal statuses. Opcodes and

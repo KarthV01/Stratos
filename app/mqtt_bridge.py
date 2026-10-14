@@ -238,6 +238,7 @@ class DeviceMessageProcessor:
         flags = int(frame.fields[10])
         position_valid = bool(flags & 8)
         battery_valid = bool(flags & 16)
+        link_connected = bool(flags & 32)
         snapshot = FlightSnapshotV1(
             vehicle_id=vehicle_id,
             device_id=device_id,
@@ -272,7 +273,10 @@ class DeviceMessageProcessor:
                 landed_state=1 if flags & 2 else 2,
                 failsafe=bool(flags & 4),
             ),
-            link=LinkState(connected=True, last_heartbeat_at=now),
+            link=LinkState(
+                connected=link_connected,
+                last_heartbeat_at=now if link_connected else None,
+            ),
         )
         await VehicleTelemetryStore(self.redis).ingest(snapshot)
         await self.redis.hset(device_key(device_id), "last_map_at", str(now))

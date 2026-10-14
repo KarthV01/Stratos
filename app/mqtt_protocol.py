@@ -170,7 +170,7 @@ def _validate_shape(frame_type: FrameType, fields: tuple[str, ...]) -> None:
         for value in fields[:10]:
             if value != "na" and not _INTEGER.fullmatch(value):
                 raise ValueError("MAP fields must be integers or na")
-        if not fields[10].isdigit() or not 0 <= int(fields[10]) <= 31:
+        if not fields[10].isdigit() or not 0 <= int(fields[10]) <= 63:
             raise ValueError("MAP flags must be an unsigned integer")
 
 

@@ -47,7 +47,7 @@ void telemetry_init(void) {
 }
 
 void on_flight_uart_byte(uint8_t byte) {
-    (void)stratos_mavlink_feed(&flight, byte);
+    (void)stratos_mavlink_feed(&flight, byte, monotonic_millis());
 }
 
 void publish_vehicle_binding(void) {
@@ -59,7 +59,7 @@ void publish_vehicle_binding(void) {
 
 void publish_fleet_map(void) {
     int size = stratos_mavlink_encode_map(
-        &flight, smp_sequence++, frame, sizeof frame);
+        &flight, smp_sequence++, monotonic_millis(), frame, sizeof frame);
     if (size > 0) mqtt_publish("stratos/v1/devices/companion-17/up/telemetry",
                                frame, (size_t)size, 0, false);
 }
@@ -78,8 +78,9 @@ The parser is platform-neutral; only the byte source and MQTT client differ.
 These are the intended integration points, not board pin assignments:
 
 - **ESP32 / ESP-IDF:** configure one UART (commonly UART2), then pass each byte
-  returned by `uart_read_bytes()` to `stratos_mavlink_feed()` from a dedicated
-  task. Use the ESP-IDF MQTT client for SMP/1.
+  returned by `uart_read_bytes()` to `stratos_mavlink_feed()` with the current
+  monotonic millisecond counter from a dedicated task. Use the ESP-IDF MQTT
+  client for SMP/1.
 - **Raspberry Pi Pico W:** configure one UART with the Pico SDK, drain bytes
   using `uart_is_readable()` / `uart_getc()`, and publish through the chosen
   Wi-Fi MQTT client.
