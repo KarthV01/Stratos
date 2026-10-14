@@ -67,15 +67,36 @@ static void test_snapshot_binding_map_and_source_filter(void) {
         &state, 6u, 1100u, payload, sizeof payload
     ) > 0);
     assert(smp1_parse(payload, strlen(payload), &frame) == 0);
-    assert(frame.type == SMP1_MAP && frame.field_count == 11u);
+    assert(frame.type == SMP1_MAP && frame.field_count == 12u);
     assert(strcmp(frame.fields[2], "-731234567") == 0);
     assert(strcmp(frame.fields[5], "500") == 0);
     assert(strcmp(frame.fields[10], "41") == 0);
+    assert(strcmp(frame.fields[11], "1") == 0);
     assert(stratos_mavlink_encode_map(
         &state, 7u, 6101u, payload, sizeof payload
     ) > 0);
     assert(smp1_parse(payload, strlen(payload), &frame) == 0);
     assert(strcmp(frame.fields[10], "9") == 0);
+
+    mavlink_msg_attitude_pack(
+        17u, 1u, &message, 50u, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f
+    );
+    length = serialize(&message, packet);
+    assert(feed_packet(&state, packet, length, 6150u) == 1);
+    assert(state.session_id == 1u);
+
+    mavlink_msg_global_position_int_pack(
+        17u, 1u, &message, 50u, 401234567, -731234567,
+        123450, 23450, 0, 0, 0, 9000u
+    );
+    length = serialize(&message, packet);
+    assert(feed_packet(&state, packet, length, 6200u) == 1);
+    assert(state.session_id == 2u);
+    assert(stratos_mavlink_encode_map(
+        &state, 8u, 6201u, payload, sizeof payload
+    ) > 0);
+    assert(smp1_parse(payload, strlen(payload), &frame) == 0);
+    assert(strcmp(frame.fields[11], "2") == 0);
 
     length = heartbeat_packet(packet, 18u, MAV_AUTOPILOT_ARDUPILOTMEGA, 0u);
     assert(feed_packet(&state, packet, length, 1200u) == 0);

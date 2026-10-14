@@ -67,14 +67,16 @@ fields are invalid.
 | `M` | telemetry | flags, battery %, link % | `SMP1|M|9|3|76|91` |
 | `V` | event | code, severity, detail | `SMP1|V|10|gps.lost|critical|fix-dropped` |
 | `B` | state | vehicle ID, MAVLink system/component IDs, autopilot, vehicle type, version | `SMP1|B|11|aircraft-17|1|1|px4|quadrotor|2` |
-| `P` | telemetry | boot ms, latitude E7, longitude E7, MSL mm, relative-altitude mm, ground speed cm/s, heading centidegrees, GPS fix, satellites, battery percent, flags | `SMP1|P|12|5000|401234567|-731234567|12345000|2345000|500|9000|3|12|87|57` |
+| `P` | telemetry | boot ms, latitude E7, longitude E7, MSL mm, relative-altitude mm, ground speed cm/s, heading centidegrees, GPS fix, satellites, battery percent, flags, session ID | `SMP1|P|12|5000|401234567|-731234567|12345000|2345000|500|9000|3|12|87|57|1` |
 
 `B` is the provisioned binding between a companion and a vehicle; MAVLink's
 8-bit system ID is not used as the fleet identifier. Send it at QoS 1 after
 MAVLink identity is detected. `P` is a compact, integer-unit fleet sample at
 QoS 0; use `na` for unavailable numeric values. The `flags` integer uses bits
 0-5 for armed, landed, failsafe, position-valid, battery-valid, and a fresh
-flight-controller heartbeat respectively. A fresh-heartbeat bit means the
+flight-controller heartbeat respectively. The final field is a positive session
+counter that increments when the primary `GLOBAL_POSITION_INT.time_boot_ms`
+decreases. A fresh-heartbeat bit means the
 embedded parser received `HEARTBEAT` (or `HIGH_LATENCY2`) within five seconds;
 it is separate from MQTT availability/LWT. The bridge rate-limits map samples
 to 2 Hz for Tier 2 and 1 Hz for Tier 3 and keeps only the latest queued map per

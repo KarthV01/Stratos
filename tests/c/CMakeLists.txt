@@ -22,7 +22,7 @@ add_test(NAME smp1_codec COMMAND test_smp1)
 add_library(stratos_smp1_tier2 STATIC ../../firmware/smp1/smp1.c)
 target_include_directories(stratos_smp1_tier2 PUBLIC ../../firmware/smp1)
 target_compile_definitions(stratos_smp1_tier2 PUBLIC
-    SMP1_MAX_FIELDS=11
+    SMP1_MAX_FIELDS=12
     SMP1_MAX_FRAME_BYTES=256
 )
 

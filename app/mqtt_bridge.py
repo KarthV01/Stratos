@@ -316,6 +316,7 @@ class DeviceMessageProcessor:
             battery_remaining,
         ) = values
         flags = int(frame.fields[10])
+        session_id = int(frame.fields[11])
         position_valid = bool(flags & 8)
         battery_valid = bool(flags & 16)
         link_connected = bool(flags & 32)
@@ -356,6 +357,7 @@ class DeviceMessageProcessor:
             link=LinkState(
                 connected=link_connected,
                 last_heartbeat_at=now if link_connected else None,
+                session_id=session_id,
             ),
         )
         await VehicleTelemetryStore(self.redis).ingest(snapshot)
