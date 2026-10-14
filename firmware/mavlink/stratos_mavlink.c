@@ -46,6 +46,29 @@ static bool valid_position(int32_t latitude, int32_t longitude) {
            longitude >= -1800000000 && longitude <= 1800000000;
 }
 
+static bool supported_message(uint32_t message_id) {
+    switch (message_id) {
+        case MAVLINK_MSG_ID_HEARTBEAT:
+        case MAVLINK_MSG_ID_GLOBAL_POSITION_INT:
+        case MAVLINK_MSG_ID_GPS_RAW_INT:
+        case MAVLINK_MSG_ID_SYS_STATUS:
+        case MAVLINK_MSG_ID_BATTERY_STATUS:
+        case MAVLINK_MSG_ID_EXTENDED_SYS_STATE:
+        case MAVLINK_MSG_ID_MISSION_CURRENT:
+        case MAVLINK_MSG_ID_HOME_POSITION:
+        case MAVLINK_MSG_ID_SYSTEM_TIME:
+        case MAVLINK_MSG_ID_AUTOPILOT_VERSION:
+        case MAVLINK_MSG_ID_ATTITUDE:
+        case MAVLINK_MSG_ID_ATTITUDE_QUATERNION:
+        case MAVLINK_MSG_ID_LOCAL_POSITION_NED:
+        case MAVLINK_MSG_ID_STATUSTEXT:
+        case MAVLINK_MSG_ID_HIGH_LATENCY2:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static uint32_t isqrt_u64(uint64_t value) {
     uint64_t bit = (uint64_t)1u << 62;
     uint64_t result = 0;
@@ -79,6 +102,10 @@ static bool process_message(
 ) {
     if (message->magic == MAVLINK_STX_MAVLINK1 && !state->allow_mavlink1) {
         state->unsupported_version_messages++;
+        return false;
+    }
+    if (!supported_message(message->msgid)) {
+        state->unknown_messages++;
         return false;
     }
 
