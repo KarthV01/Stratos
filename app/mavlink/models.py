@@ -64,6 +64,7 @@ class VehicleState:
     sensor_health: int | None = None
     controller_load_decipct: int | None = None
     communication_drop_centipct: int | None = None
+    failsafe: bool | None = None
 
 
 @dataclass(slots=True)

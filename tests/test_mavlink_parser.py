@@ -65,11 +65,48 @@ class MavlinkTelemetryAccumulatorTests(unittest.TestCase):
         self.assertTrue(snapshot.state.armed)
         self.assertTrue(snapshot.link.connected)
 
+    def test_foreign_or_non_autopilot_heartbeat_cannot_replace_vehicle(self) -> None:
+        self.parser.process(self.heartbeat(), received_at=100.0)
+        foreign = self.heartbeat()
+        foreign.system_id = 42
+        self.assertFalse(self.parser.process(foreign, received_at=101.0))
+        self.assertEqual(1, self.parser.identity.system_id)
+        payload_component = self.heartbeat()
+        payload_component.fields["autopilot"] = 8
+        self.assertFalse(self.parser.process(payload_component, received_at=102.0))
+        self.assertEqual("px4", self.parser.identity.autopilot)
+
+    def test_high_latency2_does_not_invent_gps_or_landed_state(self) -> None:
+        self.parser.process(self.heartbeat(), received_at=100.0)
+        message = FakeMessage(
+            "HIGH_LATENCY2",
+            {
+                "timestamp": 2000,
+                "latitude": 401234567,
+                "longitude": -731234567,
+                "altitude": 123,
+                "heading": 255,
+                "groundspeed": 8,
+                "battery": -1,
+                "custom_mode": 4,
+                "autopilot": 12,
+                "type": 2,
+            },
+        )
+        self.parser.gps.fix_type = 4
+        self.parser.state.landed_state = 1
+        self.parser.process(message, received_at=101.0)
+        self.assertEqual(4, self.parser.gps.fix_type)
+        self.assertEqual(1, self.parser.state.landed_state)
+        self.assertIsNone(self.parser.position.heading_cdeg)
+        self.assertEqual(160, self.parser.position.ground_speed_cms)
+
     def test_detects_ardupilot(self) -> None:
         self.parser.process(self.heartbeat(autopilot=3), received_at=100.0)
         self.assertEqual("ardupilot", self.parser.snapshot(100.0).identity.autopilot)
 
     def test_normalizes_global_position_and_invalid_heading(self) -> None:
+        self.parser.process(self.heartbeat(), received_at=99.0)
         self.parser.process(
             message(
                 "GLOBAL_POSITION_INT",
@@ -141,7 +178,29 @@ class MavlinkTelemetryAccumulatorTests(unittest.TestCase):
         self.assertEqual(1, snapshot.link.unknown_messages)
         self.assertEqual(1, snapshot.link.parse_errors)
 
+    def test_mavlink1_requires_explicit_compatibility(self) -> None:
+        version_one_heartbeat = FakeMessage(
+            "HEARTBEAT",
+            {
+                "type": 2,
+                "autopilot": 12,
+                "base_mode": 128,
+                "custom_mode": 1,
+                "system_status": 4,
+            },
+            wire_version=1,
+        )
+        self.assertFalse(self.parser.process(version_one_heartbeat))
+        self.assertIsNone(self.parser.identity.system_id)
+
+        compatible = MavlinkTelemetryAccumulator(
+            "aircraft-02", "companion-02", allow_mavlink1=True
+        )
+        self.assertTrue(compatible.process(version_one_heartbeat))
+        self.assertEqual(1, compatible.identity.mavlink_version)
+
     def test_status_text_is_a_bounded_normalized_event(self) -> None:
+        self.parser.process(self.heartbeat(), received_at=199.0)
         self.parser.process(
             message("STATUSTEXT", severity=3, text=b"GPS failsafe\x00"),
             received_at=200.0,

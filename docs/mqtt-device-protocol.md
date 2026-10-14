@@ -66,6 +66,8 @@ fields are invalid.
 | `D` | telemetry | 11 fixed-point flight fields | `SMP1|D|44|88000|407128001|-740060002|42500|120|-30|5|9120|22400|76|3` |
 | `M` | telemetry | flags, battery %, link % | `SMP1|M|9|3|76|91` |
 | `V` | event | code, severity, detail | `SMP1|V|10|gps.lost|critical|fix-dropped` |
+| `B` | state | vehicle ID, MAVLink system/component IDs, autopilot, vehicle type, version | `SMP1|B|11|aircraft-17|1|1|px4|quadrotor|2` |
+| `P` | telemetry | 10 normalized map fields plus validity flags | `SMP1|P|12|5000|401234567|-731234567|12345|2345|500|9000|3|12|87|25` |
 
 ACK status is one of `accepted`, `running`, `completed`, `failed`, or
 `rejected`. Tier 3 devices may send only the terminal statuses. Opcodes and

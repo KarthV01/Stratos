@@ -9,6 +9,7 @@ import os
 import time
 import urllib.request
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 os.environ.setdefault("MAVLINK20", "1")
 
@@ -25,6 +26,8 @@ async def receive_snapshots(
     *,
     baud: int = 115_200,
     rate_hz: float = 5.0,
+    allow_mavlink1: bool = False,
+    signing_key: bytes | None = None,
 ) -> AsyncIterator[FlightSnapshotV1]:
     """Yield snapshots while never calling a pymavlink send method."""
     connection = mavutil.mavlink_connection(
@@ -33,7 +36,18 @@ async def receive_snapshots(
         dialect="common",
         autoreconnect=True,
     )
-    accumulator = MavlinkTelemetryAccumulator(vehicle_id, device_id)
+    if signing_key is not None:
+        if len(signing_key) != 32:
+            connection.close()
+            raise ValueError("MAVLink signing keys must contain exactly 32 bytes")
+        connection.setup_signing(
+            signing_key,
+            sign_outgoing=False,
+            allow_unsigned_callback=None,
+        )
+    accumulator = MavlinkTelemetryAccumulator(
+        vehicle_id, device_id, allow_mavlink1=allow_mavlink1
+    )
     interval = 1.0 / rate_hz
     next_emit = time.monotonic()
     try:
@@ -54,12 +68,19 @@ async def receive_snapshots(
 async def _run(args: argparse.Namespace) -> None:
     batch: list[FlightSnapshotV1] = []
     deadline = time.monotonic() + 1.0
+    signing_key = (
+        Path(args.signing_key_file).read_bytes() if args.signing_key_file else None
+    )
+    if signing_key is not None and len(signing_key) != 32:
+        raise ValueError("MAVLink signing-key file must contain exactly 32 bytes")
     async for snapshot in receive_snapshots(
         args.connection,
         args.vehicle_id,
         args.device_id,
         baud=args.baud,
         rate_hz=args.rate,
+        allow_mavlink1=args.mavlink1_compatibility,
+        signing_key=signing_key,
     ):
         if not args.stratos_url:
             print(json.dumps(snapshot.as_dict(), separators=(",", ":")), flush=True)
@@ -111,6 +132,15 @@ def main() -> None:
     parser.add_argument("--rate", type=float, default=5.0)
     parser.add_argument("--stratos-url", help="controller base URL; omit to print JSON")
     parser.add_argument("--token", help="optional native-agent bearer token")
+    parser.add_argument(
+        "--mavlink1-compatibility",
+        action="store_true",
+        help="allow unsigned MAVLink 1 traffic (disabled by default)",
+    )
+    parser.add_argument(
+        "--signing-key-file",
+        help="path to a protected 32-byte MAVLink 2 signing-key file",
+    )
     args = parser.parse_args()
     if not 0 < args.rate <= 5:
         parser.error("--rate must be greater than zero and at most 5 Hz")

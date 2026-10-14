@@ -23,7 +23,9 @@ typedef enum {
     SMP1_ERROR = 'E',
     SMP1_DRONE_SNAPSHOT = 'D',
     SMP1_MINIMAL_STATUS = 'M',
-    SMP1_EVENT = 'V'
+    SMP1_EVENT = 'V',
+    SMP1_VEHICLE = 'B',
+    SMP1_MAP = 'P'
 } smp1_type_t;
 
 typedef struct {

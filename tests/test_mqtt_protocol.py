@@ -8,7 +8,9 @@ from app.mqtt_protocol import (
     encode_ack,
     encode_command,
     encode_hello,
+    encode_map_snapshot,
     encode_telemetry,
+    encode_vehicle,
     ensure_topic_matches_frame,
     parse_topic,
 )
@@ -55,6 +57,41 @@ class MqttFrameTests(unittest.TestCase):
 
         self.assertEqual("cmd-8f31", command.fields[0])
         self.assertEqual("cmd-8f31", ack.fields[0])
+
+    def test_vehicle_binding_is_compact_and_validated(self) -> None:
+        payload = encode_vehicle(2, "aircraft-01", 1, 191, "px4", "quadrotor", 2)
+        frame = decode_frame(payload)
+
+        self.assertEqual(FrameType.VEHICLE, frame.frame_type)
+        self.assertTrue(payload.startswith(b"SMP1|B|"))
+        self.assertLess(len(payload), 96)
+        self.assertEqual("aircraft-01", frame.fields[0])
+        with self.assertRaises(ValueError):
+            encode_vehicle(3, "aircraft-01", 0, 191, "px4", "quadrotor", 2)
+
+    def test_map_snapshot_uses_scaled_integers_and_null_sentinel(self) -> None:
+        payload = encode_map_snapshot(
+            3,
+            boot_ms=5000,
+            latitude_e7=401234567,
+            longitude_e7=-731234567,
+            altitude_msl_mm=12_345,
+            relative_altitude_mm=2_345,
+            ground_speed_cms=500,
+            heading_cdeg=None,
+            gps_fix_type=3,
+            satellites_visible=12,
+            battery_remaining_percent=87,
+            flags=25,
+        )
+        frame = decode_frame(payload)
+
+        self.assertEqual(FrameType.MAP, frame.frame_type)
+        self.assertTrue(payload.startswith(b"SMP1|P|"))
+        self.assertEqual("na", frame.fields[6])
+        self.assertLess(len(payload), 128)
+        with self.assertRaises(ValueError):
+            decode_frame(payload.replace(b"|5000|", b"|5.5|"))
 
     def test_topic_must_match_frame_type(self) -> None:
         frame = decode_frame(encode_telemetry(1, "humidity", 45, "pct"))
