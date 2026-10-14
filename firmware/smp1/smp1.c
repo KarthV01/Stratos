@@ -7,7 +7,10 @@
 static int valid_token(const char *value) {
     size_t length = 0;
     if (value == NULL || value[0] == '\0') return 0;
-    if (!((value[0] >= 'A' && value[0] <= 'Z') ||
+    if (value[0] == '-' && value[1] >= '0' && value[1] <= '9') {
+        length = 1;
+    }
+    if (length == 0u && !((value[0] >= 'A' && value[0] <= 'Z') ||
           (value[0] >= 'a' && value[0] <= 'z') ||
           (value[0] >= '0' && value[0] <= '9'))) return 0;
     while (value[length] != '\0') {
@@ -28,6 +31,8 @@ static int expected_fields(smp1_type_t type) {
         case SMP1_WELCOME: return 2;
         case SMP1_COMMAND: return 3;
         case SMP1_ERROR: return 2;
+        case SMP1_VEHICLE: return 6;
+        case SMP1_MAP: return 11;
         default: return -1;
     }
 }

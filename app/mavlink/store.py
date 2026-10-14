@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any
 
 from redis.asyncio import Redis
@@ -13,6 +14,7 @@ from app.mavlink.models import FlightSnapshotV1, MavlinkEvent
 
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
+VEHICLE_STALE_SECONDS = 5.0
 
 
 def validate_vehicle_id(value: str) -> str:
@@ -31,6 +33,19 @@ def vehicle_track_key(vehicle_id: str) -> str:
 
 def decode_vehicle(record: dict[str, str]) -> dict[str, Any]:
     return json.loads(record["snapshot"])
+
+
+def refresh_link_freshness(snapshot: dict[str, Any], now: float | None = None) -> dict[str, Any]:
+    """Compute staleness at read time so a silent device does not stay online forever."""
+    current_time = time.time() if now is None else now
+    link = snapshot.get("link", {})
+    last_heartbeat = link.get("last_heartbeat_at")
+    link["connected"] = bool(
+        last_heartbeat is not None
+        and 0 <= current_time - float(last_heartbeat) <= VEHICLE_STALE_SECONDS
+    )
+    snapshot["link"] = link
+    return snapshot
 
 
 def decode_track_entry(entry_id: str, fields: dict[str, str]) -> dict[str, Any]:
@@ -138,11 +153,15 @@ class VehicleTelemetryStore:
             for vehicle_id in ids:
                 pipe.hgetall(vehicle_key(vehicle_id))
             records = await pipe.execute()
-        return [decode_vehicle(record) for record in records if record]
+        return [
+            refresh_link_freshness(decode_vehicle(record))
+            for record in records
+            if record
+        ]
 
     async def get(self, vehicle_id: str) -> dict[str, Any] | None:
         record = await self.redis.hgetall(vehicle_key(vehicle_id))
-        return decode_vehicle(record) if record else None
+        return refresh_link_freshness(decode_vehicle(record)) if record else None
 
     async def track(
         self, vehicle_id: str, *, since: float | None, limit: int

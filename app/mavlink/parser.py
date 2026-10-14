@@ -24,6 +24,8 @@ from app.mavlink.models import (
 
 MAV_MODE_FLAG_SAFETY_ARMED = 128
 UINT16_MAX = 65_535
+INT16_MAX = 32_767
+INT32_MAX = 2_147_483_647
 UINT64_MAX = 18_446_744_073_709_551_615
 SUPPORTED_MESSAGES = frozenset(
     {
@@ -98,12 +100,20 @@ def _wire_version(message: Any) -> int | None:
 class MavlinkTelemetryAccumulator:
     """Normalize selected MAVLink messages without emitting MAVLink traffic."""
 
-    def __init__(self, vehicle_id: str, device_id: str, stale_seconds: float = 5.0):
+    def __init__(
+        self,
+        vehicle_id: str,
+        device_id: str,
+        stale_seconds: float = 5.0,
+        *,
+        allow_mavlink1: bool = False,
+    ):
         if not vehicle_id or not device_id:
             raise ValueError("vehicle_id and device_id are required")
         self.vehicle_id = vehicle_id
         self.device_id = device_id
         self.stale_seconds = stale_seconds
+        self.allow_mavlink1 = allow_mavlink1
         self.identity = VehicleIdentity()
         self.position = GlobalPosition()
         self.gps = GpsHealth()
@@ -129,8 +139,32 @@ class MavlinkTelemetryAccumulator:
 
         self.link.received_messages += 1
         self._track_sequence(message)
+        if _wire_version(message) == 1 and not self.allow_mavlink1:
+            self.link.unknown_messages += 1
+            return False
         if message_type not in SUPPORTED_MESSAGES:
             self.link.unknown_messages += 1
+            return False
+
+        if message_type == "HEARTBEAT":
+            autopilot = int(message.autopilot)
+            system_id, _ = _source(message)
+            if autopilot not in AUTOPILOT_NAMES:
+                return False
+            if self.identity.system_id is not None and system_id != self.identity.system_id:
+                return False
+            if (
+                self.identity.autopilot is not None
+                and self.identity.autopilot != AUTOPILOT_NAMES[autopilot]
+            ):
+                return False
+        elif message_type == "HIGH_LATENCY2" and self.identity.system_id is None:
+            autopilot = int(message.autopilot)
+            if autopilot not in AUTOPILOT_NAMES:
+                return False
+        elif self.identity.system_id is None:
+            return False
+        elif _source(message)[0] != self.identity.system_id:
             return False
 
         handler = getattr(self, f"_handle_{message_type.lower()}")
@@ -196,6 +230,8 @@ class MavlinkTelemetryAccumulator:
         system_id, component_id = _source(message)
         autopilot = int(message.autopilot)
         vehicle_type = int(message.type)
+        if autopilot not in AUTOPILOT_NAMES:
+            return
         self.identity.system_id = system_id
         self.identity.component_id = component_id
         self.identity.autopilot = AUTOPILOT_NAMES.get(autopilot, f"mav-autopilot-{autopilot}")
@@ -211,8 +247,8 @@ class MavlinkTelemetryAccumulator:
         self.link.connected = True
 
     def _handle_global_position_int(self, message: Any, now: float) -> None:
-        vx = _optional(int(message.vx), 32_767)
-        vy = _optional(int(message.vy), 32_767)
+        vx = _optional(int(message.vx), INT16_MAX)
+        vy = _optional(int(message.vy), INT16_MAX)
         self.position = GlobalPosition(
             boot_ms=int(message.time_boot_ms),
             latitude_e7=int(message.lat),
@@ -221,7 +257,7 @@ class MavlinkTelemetryAccumulator:
             relative_altitude_mm=int(message.relative_alt),
             velocity_north_cms=vx,
             velocity_east_cms=vy,
-            velocity_down_cms=_optional(int(message.vz), 32_767),
+            velocity_down_cms=_optional(int(message.vz), INT16_MAX),
             heading_cdeg=_optional(int(message.hdg), UINT16_MAX),
             ground_speed_cms=(
                 round(math.hypot(vx, vy)) if vx is not None and vy is not None else None
@@ -322,14 +358,42 @@ class MavlinkTelemetryAccumulator:
         )
 
     def _handle_high_latency2(self, message: Any, now: float) -> None:
-        self.position.latitude_e7 = int(message.latitude)
-        self.position.longitude_e7 = int(message.longitude)
+        if self.identity.system_id is None:
+            system_id, component_id = _source(message)
+            autopilot = int(message.autopilot)
+            if autopilot not in AUTOPILOT_NAMES:
+                return
+            vehicle_type = int(message.type)
+            self.identity.system_id = system_id
+            self.identity.component_id = component_id
+            self.identity.autopilot = AUTOPILOT_NAMES[autopilot]
+            self.identity.vehicle_type = VEHICLE_TYPE_NAMES.get(
+                vehicle_type, f"mav-type-{vehicle_type}"
+            )
+            self.identity.mavlink_version = _wire_version(message)
+        latitude = int(message.latitude)
+        longitude = int(message.longitude)
+        if (
+            latitude == INT32_MAX
+            or longitude == INT32_MAX
+            or not -900_000_000 <= latitude <= 900_000_000
+            or not -1_800_000_000 <= longitude <= 1_800_000_000
+        ):
+            self.position.latitude_e7 = None
+            self.position.longitude_e7 = None
+            self.position.altitude_msl_mm = None
+            self.position.relative_altitude_mm = None
+            self.position.ground_speed_cms = None
+            self.position.heading_cdeg = None
+            return
+        self.position.latitude_e7 = latitude
+        self.position.longitude_e7 = longitude
         self.position.altitude_msl_mm = int(message.altitude) * 1_000
+        self.position.relative_altitude_mm = None
         self.position.heading_cdeg = int(message.heading) * 200
         self.position.ground_speed_cms = int(message.groundspeed) * 20
-        self.gps.fix_type = _optional(getattr(message, "gps_fix_type", None), 0)
-        self.gps.satellites_visible = _optional(getattr(message, "gps_nsat", None), 255)
+        if int(message.heading) == 255:
+            self.position.heading_cdeg = None
         self.battery.remaining_percent = _optional(int(message.battery), -1)
         self.state.custom_mode = int(message.custom_mode)
-        self.state.landed_state = int(message.landed_state)
 

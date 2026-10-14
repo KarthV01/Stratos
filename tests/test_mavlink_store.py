@@ -14,7 +14,11 @@ from app.mavlink.models import (
     LinkState,
     VehicleIdentity,
 )
-from app.mavlink.store import VehicleTelemetryStore, decode_track_entry
+from app.mavlink.store import (
+    VehicleTelemetryStore,
+    decode_track_entry,
+    refresh_link_freshness,
+)
 
 
 def sample(vehicle_id: str = "aircraft-01") -> FlightSnapshotV1:
@@ -60,6 +64,12 @@ def redis_with_pipeline(previous: dict[str, str] | None = None):
 
 
 class VehicleTelemetryStoreTests(unittest.TestCase):
+    def test_staleness_is_recomputed_at_read_time(self) -> None:
+        decoded = sample().as_dict()
+        decoded["link"]["last_heartbeat_at"] = 10.0
+        self.assertTrue(refresh_link_freshness(decoded, now=15.0)["link"]["connected"])
+        self.assertFalse(refresh_link_freshness(decoded, now=15.001)["link"]["connected"])
+
     def test_ingest_writes_current_snapshot_track_and_discovery_event(self) -> None:
         redis, pipe = redis_with_pipeline()
         asyncio.run(VehicleTelemetryStore(redis).ingest(sample()))
