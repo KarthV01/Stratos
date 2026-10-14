@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #define SMP1_MAX_FRAME_BYTES 256u
-#define SMP1_MAX_FIELDS 11u
+#define SMP1_MAX_FIELDS 12u
 #define SMP1_MAX_DEVICE_ID 64u
 
 typedef enum {

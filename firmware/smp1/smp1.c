@@ -32,7 +32,7 @@ static int expected_fields(smp1_type_t type) {
         case SMP1_COMMAND: return 3;
         case SMP1_ERROR: return 2;
         case SMP1_VEHICLE: return 6;
-        case SMP1_MAP: return 11;
+        case SMP1_MAP: return 12;
         default: return -1;
     }
 }

@@ -134,15 +134,17 @@ class MavlinkTelemetryAccumulatorTests(unittest.TestCase):
         self.parser.process(self.heartbeat(sequence=8), received_at=101.0)
         self.parser.process(
             message(
-                "ATTITUDE",
+                "GLOBAL_POSITION_INT",
                 9,
                 time_boot_ms=20_000,
-                roll=0.1,
-                pitch=0.2,
-                yaw=0.3,
-                rollspeed=0.0,
-                pitchspeed=0.0,
-                yawspeed=0.0,
+                lat=40,
+                lon=-73,
+                alt=1000,
+                relative_alt=100,
+                vx=0,
+                vy=0,
+                vz=0,
+                hdg=0,
             ),
             received_at=102.0,
         )
@@ -160,8 +162,25 @@ class MavlinkTelemetryAccumulatorTests(unittest.TestCase):
             ),
             received_at=103.0,
         )
+        self.assertEqual(1, self.parser.snapshot(103.0).link.session_id)
+        self.parser.process(
+            message(
+                "GLOBAL_POSITION_INT",
+                11,
+                time_boot_ms=50,
+                lat=40,
+                lon=-73,
+                alt=1000,
+                relative_alt=100,
+                vx=0,
+                vy=0,
+                vz=0,
+                hdg=0,
+            ),
+            received_at=104.0,
+        )
 
-        snapshot = self.parser.snapshot(103.0)
+        snapshot = self.parser.snapshot(104.0)
         self.assertEqual(2, snapshot.link.dropped_messages)
         self.assertEqual(2, snapshot.link.session_id)
         self.assertEqual("autopilot-reboot", self.parser.drain_events()[0].kind)

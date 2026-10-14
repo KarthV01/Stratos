@@ -144,7 +144,7 @@ def _validate_shape(frame_type: FrameType, fields: tuple[str, ...]) -> None:
         FrameType.COMMAND: 3,
         FrameType.ERROR: 2,
         FrameType.VEHICLE: 6,
-        FrameType.MAP: 11,
+        FrameType.MAP: 12,
     }[frame_type]
     if len(fields) != expected:
         raise ValueError(f"{frame_type.name} frame requires {expected} fields")
@@ -172,6 +172,8 @@ def _validate_shape(frame_type: FrameType, fields: tuple[str, ...]) -> None:
                 raise ValueError("MAP fields must be integers or na")
         if not fields[10].isdigit() or not 0 <= int(fields[10]) <= 63:
             raise ValueError("MAP flags must be an unsigned integer")
+        if not _INTEGER.fullmatch(fields[11]) or int(fields[11]) < 1:
+            raise ValueError("MAP session ID must be a positive integer")
 
 
 def ensure_topic_matches_frame(topic: Topic, frame: Frame) -> None:
@@ -259,6 +261,7 @@ def encode_map_snapshot(
     satellites_visible: int | None,
     battery_remaining_percent: int | None,
     flags: int,
+    session_id: int = 1,
 ) -> bytes:
     def value(item: int | None) -> str:
         return "na" if item is None else str(item)
@@ -277,6 +280,7 @@ def encode_map_snapshot(
         value(satellites_visible),
         value(battery_remaining_percent),
         str(flags),
+        str(session_id),
     )
     decode_frame(payload)
     return payload

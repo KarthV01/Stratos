@@ -169,8 +169,10 @@ class MavlinkTelemetryAccumulator:
 
         handler = getattr(self, f"_handle_{message_type.lower()}")
         handler(message, now)
+        # Compare one monotonic source: the primary position stream. MAVLink
+        # timestamps from independent streams can arrive slightly out of order.
         boot_ms = getattr(message, "time_boot_ms", None)
-        if boot_ms is not None:
+        if message_type == "GLOBAL_POSITION_INT" and boot_ms is not None:
             self._track_boot_time(int(boot_ms), now)
         return True
 

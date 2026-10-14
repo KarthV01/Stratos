@@ -150,6 +150,7 @@ class DeviceMessageProcessorTests(unittest.TestCase):
             satellites_visible=12,
             battery_remaining_percent=87,
             flags=57,
+            session_id=3,
         )
         store = AsyncMock()
         with patch("app.mqtt_bridge.VehicleTelemetryStore", return_value=store):
@@ -166,6 +167,7 @@ class DeviceMessageProcessorTests(unittest.TestCase):
         self.assertEqual(87, snapshot.battery.remaining_percent)
         self.assertTrue(snapshot.state.armed)
         self.assertTrue(snapshot.link.connected)
+        self.assertEqual(3, snapshot.link.session_id)
 
     def test_map_requires_vehicle_binding(self) -> None:
         self.redis.exists.return_value = True

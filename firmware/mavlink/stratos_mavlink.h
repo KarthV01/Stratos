@@ -62,6 +62,7 @@ typedef struct {
     uint8_t has_last_packet_sequence;
     uint8_t last_packet_sequence;
     uint8_t has_heartbeat;
+    uint8_t has_position_boot_ms;
     uint16_t valid;
     uint16_t gps_eph_centi;
     uint16_t gps_epv_centi;
@@ -74,6 +75,8 @@ typedef struct {
     uint32_t custom_mode;
     uint32_t boot_ms;
     uint32_t last_heartbeat_at_ms;
+    uint32_t last_position_boot_ms;
+    uint32_t session_id;
     int32_t signed_latitude_e7;
     int32_t longitude_e7;
     int32_t altitude_msl_mm;

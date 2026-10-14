@@ -87,9 +87,26 @@ class MqttFrameTests(unittest.TestCase):
 
         self.assertEqual(FrameType.MAP, frame.frame_type)
         self.assertEqual("na", frame.fields[6])
+        self.assertEqual("1", frame.fields[11])
         self.assertLess(len(payload), 128)
         with self.assertRaises(ValueError):
             decode_frame(payload.replace(b"|5000|", b"|5.5|"))
+        with self.assertRaises(ValueError):
+            encode_map_snapshot(
+                4,
+                boot_ms=None,
+                latitude_e7=None,
+                longitude_e7=None,
+                altitude_msl_mm=None,
+                relative_altitude_mm=None,
+                ground_speed_cms=None,
+                heading_cdeg=None,
+                gps_fix_type=None,
+                satellites_visible=None,
+                battery_remaining_percent=None,
+                flags=0,
+                session_id=0,
+            )
         with self.assertRaises(ValueError):
             encode_map_snapshot(
                 4,

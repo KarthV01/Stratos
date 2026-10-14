@@ -69,8 +69,9 @@ Publish the binding after the parser identifies a PX4 or ArduPilot heartbeat,
 and again after a parser/session reset. Publish Tier 2 map samples at 2 Hz and
 Tier 3 at 1 Hz. The application owns MQTT reconnects, TLS, authentication,
 availability/Last Will, and its rate scheduler. The bridge applies the same
-rate limits and latest-value-wins policy. Use the same device ID that was
-accepted in the SMP/1 `HELLO` frame.
+rate limits and latest-value-wins policy. The map-frame session counter
+increments when `GLOBAL_POSITION_INT.time_boot_ms` decreases. Use the same
+device ID that was accepted in the SMP/1 `HELLO` frame.
 
 ## Board integration points
 

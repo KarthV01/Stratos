@@ -11,7 +11,7 @@ int main(void) {
     const char *vehicle[] = {"aircraft-01", "1", "1", "px4", "quadrotor", "2"};
     const char *map[] = {
         "100", "401234567", "-731234567", "123000", "23000", "500",
-        "9000", "3", "12", "84", "25"
+        "9000", "3", "12", "84", "25", "1"
     };
     int length = smp1_encode(
         payload, sizeof payload, SMP1_HELLO, 42u, 4u, hello
@@ -36,11 +36,12 @@ int main(void) {
     assert(frame.type == SMP1_VEHICLE && frame.field_count == 6u);
     assert(strcmp(frame.fields[0], "aircraft-01") == 0);
 
-    length = smp1_encode(payload, sizeof payload, SMP1_MAP, 44u, 11u, map);
+    length = smp1_encode(payload, sizeof payload, SMP1_MAP, 44u, 12u, map);
     assert(length > 0);
     assert(smp1_parse(payload, (size_t)length, &frame) == 0);
-    assert(frame.type == SMP1_MAP && frame.field_count == 11u);
+    assert(frame.type == SMP1_MAP && frame.field_count == 12u);
     assert(strcmp(frame.fields[2], "-731234567") == 0);
+    assert(strcmp(frame.fields[11], "1") == 0);
 
     strcpy(payload, "SMP1|H|1|a|b|2|base|extra");
     assert(smp1_parse(payload, strlen(payload), &frame) < 0);

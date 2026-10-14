@@ -163,6 +163,13 @@ static bool process_message(
         case MAVLINK_MSG_ID_GLOBAL_POSITION_INT: {
             mavlink_global_position_int_t value;
             mavlink_msg_global_position_int_decode(message, &value);
+            if (state->has_position_boot_ms &&
+                value.time_boot_ms < state->last_position_boot_ms) {
+                state->session_id = state->session_id == UINT32_MAX
+                    ? 1u : state->session_id + 1u;
+            }
+            state->last_position_boot_ms = value.time_boot_ms;
+            state->has_position_boot_ms = 1u;
             state->boot_ms = value.time_boot_ms;
             if (valid_position(value.lat, value.lon)) {
                 state->signed_latitude_e7 = value.lat;
@@ -386,6 +393,7 @@ void stratos_mavlink_init(stratos_mavlink_t *state, bool mavlink1_compatibility)
     state->vtol_state = MAV_VTOL_STATE_UNDEFINED;
     state->satellites_visible = UINT8_MAX;
     state->battery_remaining = UINT8_MAX;
+    state->session_id = 1u;
     state->gps_eph_centi = UINT16_MAX;
     state->gps_epv_centi = UINT16_MAX;
     mavlink_reset_channel_status(STRATOS_MAVLINK_CHANNEL);
@@ -480,8 +488,8 @@ int stratos_mavlink_encode_map(
     const stratos_mavlink_t *state, uint32_t sequence, uint32_t monotonic_ms,
     char *output, size_t capacity
 ) {
-    char values[11][16];
-    const char *fields[11];
+    char values[12][16];
+    const char *fields[12];
     uint8_t flags = 0u;
     bool position_valid;
     if (state == NULL || !state->initialized) return -1;
@@ -518,5 +526,6 @@ int stratos_mavlink_encode_map(
         (uint32_t)(monotonic_ms - state->last_heartbeat_at_ms) <= 5000u)
         flags |= 32u;
     fields[10] = integer_or_na(values[10], sizeof values[10], flags, true);
-    return smp1_encode(output, capacity, SMP1_MAP, sequence, 11u, fields);
+    fields[11] = integer_or_na(values[11], sizeof values[11], state->session_id, true);
+    return smp1_encode(output, capacity, SMP1_MAP, sequence, 12u, fields);
 }
