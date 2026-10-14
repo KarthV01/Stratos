@@ -61,6 +61,7 @@ typedef struct {
     uint8_t has_status_text;
     uint8_t has_last_packet_sequence;
     uint8_t last_packet_sequence;
+    uint8_t has_heartbeat;
     uint16_t valid;
     uint16_t gps_eph_centi;
     uint16_t gps_epv_centi;
@@ -72,6 +73,7 @@ typedef struct {
     int16_t battery_current_ca;
     uint32_t custom_mode;
     uint32_t boot_ms;
+    uint32_t last_heartbeat_at_ms;
     int32_t signed_latitude_e7;
     int32_t longitude_e7;
     int32_t altitude_msl_mm;
@@ -124,7 +126,9 @@ void stratos_mavlink_set_signing_key(
 );
 
 /* Feed exactly one UART byte. Returns 1 for a normalized supported message. */
-int stratos_mavlink_feed(stratos_mavlink_t *state, uint8_t byte);
+int stratos_mavlink_feed(
+    stratos_mavlink_t *state, uint8_t byte, uint32_t monotonic_ms
+);
 
 /* Encode the already-provisioned identity for SMP/1 up/state. */
 int stratos_mavlink_encode_binding(
@@ -134,7 +138,7 @@ int stratos_mavlink_encode_binding(
 
 /* Encode a compact SMP/1 fleet-map sample for SMP/1 up/telemetry. */
 int stratos_mavlink_encode_map(
-    const stratos_mavlink_t *state, uint32_t sequence,
+    const stratos_mavlink_t *state, uint32_t sequence, uint32_t monotonic_ms,
     char *output, size_t capacity
 );
 

@@ -82,7 +82,7 @@ class MqttFrameTests(unittest.TestCase):
             gps_fix_type=3,
             satellites_visible=12,
             battery_remaining_percent=87,
-            flags=25,
+            flags=57,
         )
         frame = decode_frame(payload)
 
@@ -92,6 +92,21 @@ class MqttFrameTests(unittest.TestCase):
         self.assertLess(len(payload), 128)
         with self.assertRaises(ValueError):
             decode_frame(payload.replace(b"|5000|", b"|5.5|"))
+        with self.assertRaises(ValueError):
+            encode_map_snapshot(
+                4,
+                boot_ms=None,
+                latitude_e7=None,
+                longitude_e7=None,
+                altitude_msl_mm=None,
+                relative_altitude_mm=None,
+                ground_speed_cms=None,
+                heading_cdeg=None,
+                gps_fix_type=None,
+                satellites_visible=None,
+                battery_remaining_percent=None,
+                flags=64,
+            )
 
     def test_topic_must_match_frame_type(self) -> None:
         frame = decode_frame(encode_telemetry(1, "humidity", 45, "pct"))

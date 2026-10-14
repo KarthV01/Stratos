@@ -17,11 +17,11 @@ static size_t heartbeat_packet(uint8_t *packet, uint8_t system_id,
 }
 
 static int feed_packet(stratos_mavlink_t *state, const uint8_t *packet,
-                       size_t length) {
+                       size_t length, uint32_t monotonic_ms) {
     size_t index;
     int accepted = 0;
     for (index = 0; index < length; ++index)
-        accepted += stratos_mavlink_feed(state, packet[index]);
+        accepted += stratos_mavlink_feed(state, packet[index], monotonic_ms);
     return accepted;
 }
 
@@ -39,7 +39,7 @@ static void test_snapshot_binding_map_and_source_filter(void) {
     stratos_mavlink_init(&state, false);
     length = heartbeat_packet(packet, 17u, MAV_AUTOPILOT_PX4,
                               MAV_MODE_FLAG_SAFETY_ARMED);
-    assert(feed_packet(&state, packet, length) == 1);
+    assert(feed_packet(&state, packet, length, 1000u) == 1);
     assert(state.initialized && state.system_id == 17u);
     assert(state.autopilot == MAV_AUTOPILOT_PX4);
     assert(state.mavlink_version == 2u);
@@ -49,7 +49,7 @@ static void test_snapshot_binding_map_and_source_filter(void) {
         123450, 23450, 300, 400, 10, 9000u
     );
     length = serialize(&message, packet);
-    assert(feed_packet(&state, packet, length) == 1);
+    assert(feed_packet(&state, packet, length, 1100u) == 1);
     assert(state.signed_latitude_e7 == 401234567);
     assert(state.longitude_e7 == -731234567);
     assert(state.ground_speed_cms == 500u);
@@ -64,16 +64,21 @@ static void test_snapshot_binding_map_and_source_filter(void) {
     assert(strcmp(frame.fields[3], "px4") == 0);
 
     assert(stratos_mavlink_encode_map(
-        &state, 6u, payload, sizeof payload
+        &state, 6u, 1100u, payload, sizeof payload
     ) > 0);
     assert(smp1_parse(payload, strlen(payload), &frame) == 0);
     assert(frame.type == SMP1_MAP && frame.field_count == 11u);
     assert(strcmp(frame.fields[2], "-731234567") == 0);
     assert(strcmp(frame.fields[5], "500") == 0);
+    assert(strcmp(frame.fields[10], "41") == 0);
+    assert(stratos_mavlink_encode_map(
+        &state, 7u, 6101u, payload, sizeof payload
+    ) > 0);
+    assert(smp1_parse(payload, strlen(payload), &frame) == 0);
     assert(strcmp(frame.fields[10], "9") == 0);
 
     length = heartbeat_packet(packet, 18u, MAV_AUTOPILOT_ARDUPILOTMEGA, 0u);
-    assert(feed_packet(&state, packet, length) == 0);
+    assert(feed_packet(&state, packet, length, 1200u) == 0);
     assert(state.system_id == 17u);
     assert(state.foreign_messages == 1u);
 }
@@ -86,20 +91,20 @@ static void test_bad_crc_truncation_and_recovery(void) {
     stratos_mavlink_init(&state, false);
     length = heartbeat_packet(packet, 23u, MAV_AUTOPILOT_ARDUPILOTMEGA, 0u);
     packet[length - 1u] ^= 0x80u;
-    assert(feed_packet(&state, packet, length) == 0);
+    assert(feed_packet(&state, packet, length, 1000u) == 0);
     assert(!state.initialized);
     assert(state.parse_errors > 0u);
 
     length = heartbeat_packet(packet, 23u, MAV_AUTOPILOT_ARDUPILOTMEGA, 0u);
-    assert(feed_packet(&state, packet, length) == 1);
+    assert(feed_packet(&state, packet, length, 1100u) == 1);
     assert(state.initialized && state.system_id == 23u);
 
     stratos_mavlink_init(&state, false);
-    assert(feed_packet(&state, packet, length - 2u) == 0);
+    assert(feed_packet(&state, packet, length - 2u, 1200u) == 0);
     assert(!state.initialized);
     /* A UART flush/session reset discards an incomplete trailing frame. */
     stratos_mavlink_init(&state, false);
-    assert(feed_packet(&state, packet, length) == 1);
+    assert(feed_packet(&state, packet, length, 1300u) == 1);
     assert(state.initialized);
 }
 
@@ -113,7 +118,7 @@ static void test_unknown_and_mavlink1_policy(void) {
     (void)heartbeat_packet(packet, 33u, MAV_AUTOPILOT_PX4, 0u);
     mavlink_msg_named_value_float_pack(33u, 1u, &message, 10u, "test", 1.0f);
     length = serialize(&message, packet);
-    assert(feed_packet(&state, packet, length) == 0);
+    assert(feed_packet(&state, packet, length, 1000u) == 0);
     assert(state.unknown_messages == 1u);
 
     mavlink_get_channel_status(MAVLINK_COMM_0)->flags |=
@@ -124,12 +129,12 @@ static void test_unknown_and_mavlink1_policy(void) {
         (uint8_t)~MAVLINK_STATUS_FLAG_OUT_MAVLINK1;
 
     stratos_mavlink_init(&state, false);
-    assert(feed_packet(&state, packet, length) == 0);
+    assert(feed_packet(&state, packet, length, 1000u) == 0);
     assert(state.unsupported_version_messages == 1u);
     assert(!state.initialized);
 
     stratos_mavlink_init(&state, true);
-    assert(feed_packet(&state, packet, length) == 1);
+    assert(feed_packet(&state, packet, length, 1000u) == 1);
     assert(state.initialized && state.mavlink_version == 1u);
 }
 
@@ -157,12 +162,12 @@ static void test_signing_key_requires_verified_signed_packets(void) {
 
     stratos_mavlink_init(&receiver, false);
     stratos_mavlink_set_signing_key(&receiver, key, 1000000u);
-    assert(feed_packet(&receiver, packet, length) == 1);
+    assert(feed_packet(&receiver, packet, length, 2000u) == 1);
     assert(receiver.initialized && receiver.system_id == 44u);
 
     length = heartbeat_packet(packet, 44u, MAV_AUTOPILOT_PX4, 0u);
     for (index = 0u; index < length; ++index)
-        (void)stratos_mavlink_feed(&receiver, packet[index]);
+        (void)stratos_mavlink_feed(&receiver, packet[index], 2000u);
     assert(receiver.received_messages == 1u);
     assert(receiver.parse_errors > 0u);
 }

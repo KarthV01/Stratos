@@ -98,7 +98,8 @@ static void set_identity(
 }
 
 static bool process_message(
-    stratos_mavlink_t *state, const mavlink_message_t *message
+    stratos_mavlink_t *state, const mavlink_message_t *message,
+    uint32_t monotonic_ms
 ) {
     if (message->magic == MAVLINK_STX_MAVLINK1 && !state->allow_mavlink1) {
         state->unsupported_version_messages++;
@@ -134,6 +135,8 @@ static bool process_message(
         state->base_mode = value.base_mode;
         state->custom_mode = value.custom_mode;
         state->system_status = value.system_status;
+        state->last_heartbeat_at_ms = monotonic_ms;
+        state->has_heartbeat = 1u;
         return true;
     }
 
@@ -364,6 +367,8 @@ static bool process_message(
                 state->valid |= STRATOS_MAVLINK_VALID_BATTERY;
             }
             state->failure_flags = value.failure_flags;
+            state->last_heartbeat_at_ms = monotonic_ms;
+            state->has_heartbeat = 1u;
             return true;
         }
         default:
@@ -404,7 +409,9 @@ void stratos_mavlink_set_signing_key(
     channel_status->signing_streams = &state->signing_streams;
 }
 
-int stratos_mavlink_feed(stratos_mavlink_t *state, uint8_t byte) {
+int stratos_mavlink_feed(
+    stratos_mavlink_t *state, uint8_t byte, uint32_t monotonic_ms
+) {
     mavlink_message_t message;
     mavlink_status_t parse_status;
     mavlink_status_t *channel_status;
@@ -434,7 +441,7 @@ int stratos_mavlink_feed(stratos_mavlink_t *state, uint8_t byte) {
         state->last_packet_sequence = message.seq;
         state->has_last_packet_sequence = 1u;
     }
-    processed = process_message(state, &message);
+    processed = process_message(state, &message, monotonic_ms);
     return processed ? 1 : 0;
 }
 
@@ -470,7 +477,7 @@ static const char *integer_or_na(char *buffer, size_t size, int64_t value,
 }
 
 int stratos_mavlink_encode_map(
-    const stratos_mavlink_t *state, uint32_t sequence,
+    const stratos_mavlink_t *state, uint32_t sequence, uint32_t monotonic_ms,
     char *output, size_t capacity
 ) {
     char values[11][16];
@@ -507,6 +514,9 @@ int stratos_mavlink_encode_map(
     if (position_valid) flags |= 8u;
     if ((state->valid & STRATOS_MAVLINK_VALID_BATTERY) != 0u ||
         state->has_battery_remaining) flags |= 16u;
+    if (state->has_heartbeat &&
+        (uint32_t)(monotonic_ms - state->last_heartbeat_at_ms) <= 5000u)
+        flags |= 32u;
     fields[10] = integer_or_na(values[10], sizeof values[10], flags, true);
     return smp1_encode(output, capacity, SMP1_MAP, sequence, 11u, fields);
 }

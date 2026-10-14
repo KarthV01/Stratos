@@ -208,7 +208,7 @@ class DeviceMessageProcessorTests(unittest.TestCase):
             gps_fix_type=3,
             satellites_visible=12,
             battery_remaining_percent=87,
-            flags=25,
+            flags=57,
         )
         store = AsyncMock()
         with patch("app.mqtt_bridge.VehicleTelemetryStore", return_value=store):
@@ -224,6 +224,7 @@ class DeviceMessageProcessorTests(unittest.TestCase):
         self.assertEqual(401234567, snapshot.position.latitude_e7)
         self.assertEqual(87, snapshot.battery.remaining_percent)
         self.assertTrue(snapshot.state.armed)
+        self.assertTrue(snapshot.link.connected)
 
     def test_map_requires_vehicle_binding(self) -> None:
         self.redis.exists.return_value = True
@@ -275,7 +276,7 @@ class DeviceMessageProcessorTests(unittest.TestCase):
             gps_fix_type=3,
             satellites_visible=12,
             battery_remaining_percent=87,
-            flags=25,
+            flags=57,
         )
         store = AsyncMock()
         with patch("app.mqtt_bridge.VehicleTelemetryStore", return_value=store):
