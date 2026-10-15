@@ -71,6 +71,15 @@ async def record_observation(
             approximate=True,
         )
         await pipe.execute()
+    count = await redis.zcard(OBSERVATION_INDEX)
+    if count > OBSERVATION_MAXLEN:
+        stale = await redis.zrange(OBSERVATION_INDEX, 0, count - OBSERVATION_MAXLEN - 1)
+        if stale:
+            async with redis.pipeline(transaction=True) as pipe:
+                for stale_id in stale:
+                    pipe.delete(observation_key(stale_id))
+                pipe.zrem(OBSERVATION_INDEX, *stale)
+                await pipe.execute()
     return record
 
 

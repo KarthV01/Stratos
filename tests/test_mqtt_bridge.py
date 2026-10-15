@@ -9,6 +9,7 @@ from app.mqtt_protocol import (
     encode_ack,
     encode_drone_snapshot,
     encode_hello,
+    encode_geospatial_sensor,
     encode_map_snapshot,
     encode_minimal_status,
     encode_telemetry,
@@ -84,6 +85,25 @@ class DeviceMessageProcessorTests(unittest.TestCase):
         self.assertIn('"value":"43.2"', stream_call.args[1]["payload"])
         self.assertEqual("2", stream_call.args[1]["tier"])
         self.assertEqual(100_000, stream_call.kwargs["maxlen"])
+
+    def test_geospatial_sensor_is_normalized_as_observation(self) -> None:
+        self.redis.exists.return_value = True
+        self.redis.hget.return_value = "2"
+        self.redis.set.return_value = True
+        self.redis.hgetall.return_value = {"tier": "2", "vehicle_id": "aircraft-1"}
+        payload = encode_geospatial_sensor(
+            8, "temperature", 21.5, "C", 407128001, -740060002, 12500
+        )
+
+        with patch("app.mqtt_bridge.record_observation", new_callable=AsyncMock) as record:
+            asyncio.run(
+                self.processor.process(
+                    device_topic("garden-1", "up", "telemetry"), payload
+                )
+            )
+
+        self.assertEqual("explicit", record.await_args.kwargs["location_source"])
+        self.assertEqual(407128001, record.await_args.kwargs["latitude_e7"])
 
     def test_ack_updates_existing_command(self) -> None:
         self.redis.exists.return_value = True

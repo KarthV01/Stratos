@@ -26,6 +26,8 @@ def redis_pipeline():
     pipe.__aenter__ = AsyncMock(return_value=pipe)
     pipe.__aexit__ = AsyncMock(return_value=None)
     redis.pipeline = Mock(return_value=pipe)
+    redis.zcard = AsyncMock(return_value=0)
+    redis.zrange = AsyncMock(return_value=[])
     return redis, pipe
 
 

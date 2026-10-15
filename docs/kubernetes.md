@@ -118,6 +118,12 @@ and Tier 3 agents use SMP/1 MQTT at `<minikube-ip>:31883`. These NodePorts are
 development-only and require TLS plus per-device authentication before use on
 an untrusted network.
 
+The mapping API is available at `http://<minikube-ip>:30810`. It stores
+completed GeoTIFFs on the `mapping-artifacts` PVC and calls a token-protected
+NodeODM container running on the laptop at `host.minikube.internal:3000`.
+Start that heavyweight service with `docker compose up -d nodeodm` before the
+cluster; it is intentionally not scheduled into the 2 GiB Minikube nodes.
+
 Inspect logs and rollout state:
 
 ```powershell

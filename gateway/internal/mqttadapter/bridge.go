@@ -276,6 +276,18 @@ func (b *Bridge) observation(ctx context.Context, id, vehicle, sensor, value, un
 	p.ZAdd(ctx, "observation-index", redis.Z{Score: float64(now.UnixNano()) / 1e9, Member: observationID})
 	p.XAdd(ctx, &redis.XAddArgs{Stream: "observations", MaxLen: 100000, Approx: true, Values: map[string]any{"observation_id": observationID, "payload": string(payload)}})
 	_, err := p.Exec(ctx)
+	if err == nil {
+		count := b.Redis.ZCard(ctx, "observation-index").Val()
+		if count > 100000 {
+			stale := b.Redis.ZRange(ctx, "observation-index", 0, count-100001).Val()
+			cleanup := b.Redis.TxPipeline()
+			for _, staleID := range stale {
+				cleanup.Del(ctx, "observation:"+staleID)
+				cleanup.ZRem(ctx, "observation-index", staleID)
+			}
+			_, _ = cleanup.Exec(ctx)
+		}
+	}
 	return err
 }
 func (b *Bridge) event(ctx context.Context, id, kind, name, value, detail string, now time.Time) error {

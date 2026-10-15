@@ -115,3 +115,19 @@ secret manager or Kubernetes Secret, not firmware source or Git.
 SMP/1 intentionally excludes firmware updates, bulk data, and dynamic code.
 Those require a separately authenticated transfer protocol and hardware-specific
 rollback strategy.
+
+## Geospatial sensor samples
+
+Devices that know the location of an individual reading use the atomic `G`
+frame on `up/telemetry`:
+
+```text
+SMP1|G|seq|sensor|value|unit|lat_e7|lon_e7|altitude_mm_or_na
+```
+
+Latitude and longitude use signed degrees times `1e7`; altitude is signed
+millimeters or `na`. The bridge validates coordinate ranges and converts the
+frame into `stratos.observation/1` JSON. Both Tier 2 and Tier 3 may send this
+frame, subject to their existing 256-byte and 128-byte limits. Ordinary `T`
+frames stay compatible and become mapped observations only when the server has
+a fixed device position or a fresh bound-vehicle position.

@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 
 from app.broker import redis_client
-from app.mapping.nodeodm import NodeODMClient, NodeODMError, extract_orthophoto
+from app.mapping.nodeodm import NodeODMClient, extract_orthophoto
 from app.mqtt_protocol import validate_device_id
 
 
@@ -152,7 +152,7 @@ def create_app(
         task_id = str(uuid4())
         try:
             node_task_id = await odm.initialize(body.name, task_id)
-        except NodeODMError as exc:
+        except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         now = time.time()
         record = {
@@ -228,13 +228,14 @@ def create_app(
             raise HTTPException(status_code=422, detail="Upload between 1 and 100 images per batch")
         if len(ids) != len(files) or len(set(ids)) != len(ids):
             raise HTTPException(status_code=422, detail="Provide one unique image ID per file")
-        selected: list[tuple[str, UploadFile]] = []
         for image_id, upload in zip(ids, files):
             if not 1 <= len(image_id) <= 64 or not image_id.replace("-", "").replace("_", "").isalnum():
                 raise HTTPException(status_code=422, detail="Invalid image ID")
             if Path(upload.filename or "").suffix.lower() not in ALLOWED_IMAGE_SUFFIXES:
                 raise HTTPException(status_code=415, detail="Only JPEG and TIFF images are supported")
-            if not await redis.exists(image_key(survey_id, image_id)):
+        selected: list[tuple[str, UploadFile]] = []
+        for image_id, upload in zip(ids, files):
+            if await redis.hsetnx(image_key(survey_id, image_id), "reserved", "1"):
                 selected.append((image_id, upload))
         if selected:
             try:
@@ -245,7 +246,10 @@ def create_app(
                         for image_id, upload in selected
                     ],
                 )
-            except NodeODMError as exc:
+            except Exception as exc:
+                await redis.delete(
+                    *(image_key(survey_id, image_id) for image_id, _ in selected)
+                )
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
             vehicles = set(json.loads(survey.get("vehicles", "[]")))
             sectors = set(json.loads(survey.get("sectors", "[]")))
@@ -257,6 +261,7 @@ def create_app(
                     pipe.hset(
                         image_key(survey_id, image_id),
                         mapping={
+                            "reserved": "0",
                             "image_id": image_id,
                             "filename": upload.filename or image_id,
                             "agent_id": agent_id,
@@ -288,7 +293,7 @@ def create_app(
             raise HTTPException(status_code=409, detail="Survey has no images")
         try:
             await odm.commit(survey["nodeodm_task_id"])
-        except NodeODMError as exc:
+        except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         await redis.hset(
             survey_key(survey_id),

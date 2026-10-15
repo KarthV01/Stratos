@@ -97,6 +97,13 @@ Safety events and command acknowledgements use QoS 1. High-rate snapshots and
 scalar samples use QoS 0 because freshness matters more than retransmitting old
 vehicle state. Devices reduce rate before buffering when the link degrades.
 
+For readings that must appear on a geographic map, Tier 2 and Tier 3 can use
+the atomic `G` frame documented in `mqtt-device-protocol.md`. The gateway
+normalizes it to JSON; microcontrollers do not need a JSON encoder. Tier 1
+agents advertise `survey.capture`, `imagery.upload`, `sensor.report`, and
+`flight.telemetry` as applicable. Bulk survey images use the mapping API rather
+than any telemetry payload.
+
 ## Development cluster addresses
 
 After `kubectl apply -k k8s`, run `minikube ip` and use the returned address:

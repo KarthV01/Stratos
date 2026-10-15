@@ -83,6 +83,16 @@ the local edge camera bridge. See
 [`docs/edge-camera-bridge.md`](docs/edge-camera-bridge.md) for the runnable
 service, supported source types, security boundary, and platform research.
 
+## Mapping
+
+Full agents can upload multi-drone survey photographs to the dedicated mapping
+service, which submits one staged NodeODM job and publishes the resulting
+orthophoto GeoTIFF. Embedded agents can contribute fixed-point geospatial sensor
+samples that the gateway normalizes into map-ready GeoJSON.
+
+See [`docs/mapping-backend.md`](docs/mapping-backend.md) for the survey API,
+`SMP/1` geospatial frame, observation queries, and laptop deployment model.
+
 ## Full Agents
 
 Tier 1 Linux and Windows agents use the Stratos Agent Gateway Protocol (SAGP/1)

@@ -81,6 +81,27 @@ class FullAgentGatewayTests(unittest.TestCase):
         self.assertEqual("flight", latest.kwargs["mapping"]["kind"])
         self.assertEqual("device-telemetry", self.redis.xadd.await_args.args[0])
 
+    def test_positioned_full_agent_sensors_become_observations(self) -> None:
+        self.redis.hgetall.return_value = {
+            "id": "drone-full-1",
+            "tier": "1",
+            "transport": "https",
+            "boot_id": "boot-1",
+            "vehicle_id": "aircraft-1",
+        }
+        self.redis.set.return_value = True
+        sample = telemetry()
+        sample.flight.latitude_e7 = 407128001
+        sample.flight.longitude_e7 = -740060002
+        sample.sensors = {"temperature": 21.5}
+
+        with patch("app.agent_gateway.record_observation", new_callable=AsyncMock) as record:
+            asyncio.run(ingest_full_telemetry("drone-full-1", sample, self.request))
+
+        self.assertEqual("temperature", record.await_args.kwargs["sensor"])
+        self.assertEqual("aircraft-1", record.await_args.kwargs["vehicle_id"])
+        self.assertEqual(407128001, record.await_args.kwargs["latitude_e7"])
+
     def test_command_poll_returns_structured_payload(self) -> None:
         self.redis.hgetall.return_value = {
             "id": "drone-full-1",
