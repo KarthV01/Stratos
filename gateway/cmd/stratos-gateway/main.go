@@ -11,6 +11,7 @@ import (
 	gatewayv1 "github.com/KarthV01/Stratos/gateway/gen/stratos/gateway/v1"
 	"github.com/KarthV01/Stratos/gateway/internal/config"
 	"github.com/KarthV01/Stratos/gateway/internal/fullagent"
+	"github.com/KarthV01/Stratos/gateway/internal/mqttadapter"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 )
@@ -44,10 +45,12 @@ func run() error {
 	}
 	server := grpc.NewServer(grpc.MaxRecvMsgSize(1024*1024), grpc.MaxSendMsgSize(1024*1024))
 	gatewayv1.RegisterFullAgentGatewayServer(server, &fullagent.GRPCServer{Backend: backend})
-	errs := make(chan error, 2)
+	mqttBridge := mqttadapter.New(rdb, cfg.MQTTBroker, cfg.MQTTUsername, cfg.MQTTPassword, cfg.MQTTClientID, cfg.HeartbeatSeconds)
+	errs := make(chan error, 3)
 	go func() { errs <- fullagent.ServeTCP(ctx, tcp, backend) }()
 	go func() { errs <- server.Serve(grpcListener) }()
-	log.Printf("unified gateway: SAGP TCP %s, gRPC %s", cfg.TCPAddr, cfg.GRPCAddr)
+	go func() { errs <- mqttBridge.Run(ctx) }()
+	log.Printf("unified gateway: SAGP TCP %s, gRPC %s; SMP/1 MQTT %s", cfg.TCPAddr, cfg.GRPCAddr, cfg.MQTTBroker)
 	select {
 	case <-ctx.Done():
 		server.GracefulStop()
