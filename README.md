@@ -78,6 +78,11 @@ The complete drone-to-ground payload matrix—including the Tier 1 HTTPS/JSON
 agent protocol and normalized flight fields for all tiers—is documented in
 [`docs/tier-payload-protocols.md`](docs/tier-payload-protocols.md).
 
+Linux companion computers can terminate USB/CSI and RTSP/RTP camera feeds with
+the local edge camera bridge. See
+[`docs/edge-camera-bridge.md`](docs/edge-camera-bridge.md) for the runnable
+service, supported source types, security boundary, and platform research.
+
 ## Full Agents
 
 Tier 1 Linux and Windows agents use the Stratos Agent Gateway Protocol (SAGP/1)
