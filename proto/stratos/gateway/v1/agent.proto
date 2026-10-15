@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package stratos.gateway.v1;
 
+option go_package = "github.com/KarthV01/Stratos/gateway/gen/stratos/gateway/v1;gatewayv1";
+
 service FullAgentGateway {
   rpc Connect(stream AgentMessage) returns (stream GatewayMessage);
 }
