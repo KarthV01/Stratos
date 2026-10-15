@@ -9,6 +9,7 @@ type Config struct {
 	RedisURL, MQTTBroker, MQTTUsername, MQTTPassword            string
 	TCPAddr, GRPCAddr, AgentToken, TLSCert, TLSKey, TLSClientCA string
 	MQTTClientID                                                string
+	MQTTTLS                                                     bool
 	HeartbeatSeconds, LeaseTimeoutMS                            int
 }
 
@@ -22,8 +23,20 @@ func Load() Config {
 		AgentToken: os.Getenv("GATEWAY_AGENT_TOKEN"), TLSCert: os.Getenv("GATEWAY_TLS_CERT"),
 		TLSKey: os.Getenv("GATEWAY_TLS_KEY"), TLSClientCA: os.Getenv("GATEWAY_TLS_CLIENT_CA"),
 		MQTTClientID:     env("MQTT_BRIDGE_ID", "stratos-go-gateway"),
+		MQTTTLS:          envBool("MQTT_TLS", false),
 		HeartbeatSeconds: envInt("GATEWAY_HEARTBEAT_SECONDS", 20), LeaseTimeoutMS: envInt("GATEWAY_LEASE_TIMEOUT_MS", 30000),
 	}
+}
+func envBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(v)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func env(key, fallback string) string {

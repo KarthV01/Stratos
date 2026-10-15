@@ -2,6 +2,7 @@ package mqttadapter
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -25,11 +26,14 @@ type Bridge struct {
 	messages         chan inbound
 }
 
-func New(r *redis.Client, broker, user, password, clientID string, heartbeat int) *Bridge {
+func New(r *redis.Client, broker, user, password, clientID string, heartbeat int, useTLS bool) *Bridge {
 	b := &Bridge{Redis: r, ClientID: clientID, HeartbeatSeconds: heartbeat, messages: make(chan inbound, 1000)}
 	o := mqtt.NewClientOptions().AddBroker(broker).SetClientID(clientID).SetProtocolVersion(4).SetAutoReconnect(true)
 	if user != "" {
 		o.SetUsername(user).SetPassword(password)
+	}
+	if useTLS {
+		o.SetTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12})
 	}
 	o.SetOnConnectHandler(func(c mqtt.Client) {
 		if t := c.Subscribe(TopicPrefix+"/+/up/+", 1, b.onMessage); t.Wait() && t.Error() != nil {

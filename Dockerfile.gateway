@@ -1,0 +1,11 @@
+FROM golang:1.25-alpine AS build
+WORKDIR /src/gateway
+COPY gateway/go.mod gateway/go.sum ./
+RUN go mod download
+COPY gateway ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/stratos-gateway ./cmd/stratos-gateway
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/stratos-gateway /stratos-gateway
+EXPOSE 7442 7443
+ENTRYPOINT ["/stratos-gateway"]

@@ -42,23 +42,9 @@ services:
       - "8000:8000"
 
   gateway:
-    build: .
-    command: ["python", "-m", "app.stratos_gateway.main"]
-    restart: unless-stopped
-    depends_on:
-      redis:
-        condition: service_healthy
-    environment:
-      REDIS_URL: redis://redis:6379/0
-      GATEWAY_TCP_PORT: "7442"
-      GATEWAY_GRPC_PORT: "7443"
-    ports:
-      - "7442:7442"
-      - "7443:7443"
-
-  mqtt-bridge:
-    build: .
-    command: ["python", "-m", "app.stratos_gateway.mqtt"]
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
     restart: unless-stopped
     depends_on:
       redis:
@@ -67,9 +53,14 @@ services:
         condition: service_started
     environment:
       REDIS_URL: redis://redis:6379/0
+      GATEWAY_TCP_PORT: "7442"
+      GATEWAY_GRPC_PORT: "7443"
       MQTT_HOST: mqtt
       MQTT_PORT: "1883"
-      MQTT_BRIDGE_ID: mqtt-bridge-compose
+      MQTT_BRIDGE_ID: stratos-go-gateway-compose
+    ports:
+      - "7442:7442"
+      - "7443:7443"
 
   worker-1:
     <<: *worker
