@@ -1,0 +1,38 @@
+name: Go gateway
+
+on:
+  push:
+    paths:
+      - "gateway/**"
+      - "proto/stratos/gateway/v1/agent.proto"
+      - "Dockerfile.gateway"
+  pull_request:
+    paths:
+      - "gateway/**"
+      - "proto/stratos/gateway/v1/agent.proto"
+      - "Dockerfile.gateway"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gateway/go.mod
+          cache-dependency-path: gateway/go.sum
+      - run: go test -race ./...
+      - run: go vet ./...
+      - run: go build -trimpath ./cmd/stratos-gateway
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f Dockerfile.gateway -t stratos-gateway:test .
