@@ -81,11 +81,12 @@ if ($LASTEXITCODE -ne 0) { throw "The Kubernetes manifests failed to apply." }
 
 # The development image keeps a stable tag, so force application pods to pick up
 # the image that was just rebuilt and loaded.
-kubectl --context $profile -n stratos rollout restart deployment/controller deployment/worker
+kubectl --context $profile -n stratos rollout restart deployment/controller deployment/mapping deployment/worker
 if ($LASTEXITCODE -ne 0) { throw "Restarting the application deployments failed." }
 
 kubectl --context $profile -n stratos rollout status deployment/redis --timeout=5m
 kubectl --context $profile -n stratos rollout status deployment/controller --timeout=5m
+kubectl --context $profile -n stratos rollout status deployment/mapping --timeout=5m
 kubectl --context $profile -n stratos rollout status deployment/worker --timeout=5m
 
 Write-Host ""

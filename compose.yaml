@@ -41,6 +41,34 @@ services:
     ports:
       - "8000:8000"
 
+  nodeodm:
+    image: opendronemap/nodeodm
+    restart: unless-stopped
+    command: ["--token", "stratos-development-token", "--max-concurrency", "1"]
+    ports:
+      - "3000:3000"
+    volumes:
+      - nodeodm-data:/var/www/data
+
+  mapping:
+    build: .
+    command: ["python", "-m", "app.mapping.server"]
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      nodeodm:
+        condition: service_started
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      NODEODM_URL: http://nodeodm:3000
+      NODEODM_TOKEN: stratos-development-token
+      MAPPING_ARTIFACT_DIR: /data/mapping
+    ports:
+      - "8010:8010"
+    volumes:
+      - mapping-data:/data/mapping
+
   gateway:
     build:
       context: .
@@ -83,3 +111,5 @@ services:
 volumes:
   broker-data:
   mqtt-data:
+  nodeodm-data:
+  mapping-data:

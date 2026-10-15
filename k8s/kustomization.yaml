@@ -6,4 +6,5 @@ resources:
   - mqtt.yaml
   - gateway.yaml
   - controller.yaml
+  - mapping.yaml
   - worker.yaml

@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mapping-artifacts
+  namespace: stratos
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nodeodm
+  namespace: stratos
+type: Opaque
+stringData:
+  token: stratos-development-token
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mapping
+  namespace: stratos
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mapping
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mapping
+        app.kubernetes.io/part-of: stratos
+    spec:
+      initContainers:
+        - name: wait-for-redis
+          image: busybox:1.37
+          command: [sh, -c, "until nc -z redis 6379; do sleep 2; done"]
+      containers:
+        - name: mapping
+          image: stratos:dev
+          imagePullPolicy: Never
+          command: ["python", "-m", "app.mapping.server"]
+          env:
+            - name: REDIS_URL
+              value: redis://redis:6379/0
+            - name: NODEODM_URL
+              value: http://host.minikube.internal:3000
+            - name: NODEODM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: nodeodm
+                  key: token
+            - name: MAPPING_ARTIFACT_DIR
+              value: /data/mapping
+          ports:
+            - name: http
+              containerPort: 8010
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: artifacts
+              mountPath: /data/mapping
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: mapping-artifacts
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mapping
+  namespace: stratos
+spec:
+  selector:
+    app.kubernetes.io/name: mapping
+  ports:
+    - name: http
+      port: 8010
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mapping-agent
+  namespace: stratos
+  annotations:
+    stratos.dev/security: development-only-cleartext-listener
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: mapping
+  ports:
+    - name: http
+      port: 8010
+      targetPort: http
+      nodePort: 30810
