@@ -33,3 +33,4 @@ AGENT_GATEWAY_GROUP = "full-agent-gateways"
 VEHICLE_INDEX = "vehicle-index"
 VEHICLE_EVENT_STREAM = "vehicle-events"
 VEHICLE_TRACK_MAXLEN = int(os.getenv("VEHICLE_TRACK_MAXLEN", "10000"))
+OBSERVATION_MAXLEN = int(os.getenv("OBSERVATION_MAXLEN", "100000"))

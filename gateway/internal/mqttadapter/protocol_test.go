@@ -28,3 +28,13 @@ func TestRejectsOversizedAndMismatchedFrames(t *testing.T) {
 		t.Fatal("accepted mismatched channel")
 	}
 }
+
+func TestDecodeGeospatialSensor(t *testing.T) {
+	f, err := Decode([]byte("SMP1|G|14|temperature|21.5|C|407128001|-740060002|12500"))
+	if err != nil || f.Type != "G" || f.Fields[3] != "407128001" {
+		t.Fatalf("unexpected geospatial frame: %#v %v", f, err)
+	}
+	if _, err = Decode([]byte("SMP1|G|15|temperature|21.5|C|900000001|0|na")); err == nil {
+		t.Fatal("expected latitude validation error")
+	}
+}

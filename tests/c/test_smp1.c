@@ -34,6 +34,16 @@ int main(void) {
         assert(strcmp(payload, "SMP1|M|9|3|76|91") == 0);
     }
 
+    {
+        const char *sample[] = {
+            "temperature", "21.5", "C", "407128001", "-740060002", "12500"
+        };
+        length = smp1_encode(
+            payload, sizeof payload, SMP1_GEO_SENSOR, 10u, 6u, sample
+        );
+        assert(length > 0);
+    }
+
     strcpy(payload, "SMP1|H|1|a|b|2|base|extra");
     assert(smp1_parse(payload, strlen(payload), &frame) < 0);
     strcpy(payload, "SMP1|H|1|-bad|b|2|base");

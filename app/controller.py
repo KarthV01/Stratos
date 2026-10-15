@@ -42,6 +42,7 @@ from app.mavlink.api_models import VehicleTelemetryBatch
 from app.mavlink.store import VehicleTelemetryStore, validate_vehicle_id
 from app.stratos_gateway.backend import agent_key, agent_task_stream, validate_agent_id
 from app.tier_payloads import FullCommand, encode_full_payload
+from app.geospatial import router as geospatial_router
 
 
 class TaskRequest(BaseModel):
@@ -98,6 +99,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Stratos Task API", lifespan=lifespan)
 app.include_router(agent_router)
+app.include_router(geospatial_router)
 
 
 @app.get("/", include_in_schema=False)
@@ -110,6 +112,7 @@ async def service_info() -> dict[str, str]:
         "devices": "/api/devices",
         "agents": "/api/agents",
         "vehicles": "/api/vehicles",
+        "observations": "/api/map/observations",
         "docs": "/docs",
     }
 

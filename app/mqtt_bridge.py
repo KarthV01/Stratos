@@ -58,6 +58,7 @@ from app.mavlink.models import (
     VehicleState,
 )
 from app.mavlink.store import VehicleTelemetryStore
+from app.geospatial import record_observation
 
 
 HEARTBEAT_SECONDS = int(os.getenv("MQTT_HEARTBEAT_SECONDS", "30"))
@@ -104,6 +105,7 @@ class DeviceMessageProcessor:
                 FrameType.EVENT,
                 FrameType.VEHICLE,
                 FrameType.MAP,
+                FrameType.GEO_SENSOR,
             },
             3: {
                 FrameType.TELEMETRY,
@@ -112,6 +114,7 @@ class DeviceMessageProcessor:
                 FrameType.MINIMAL_STATUS,
                 FrameType.VEHICLE,
                 FrameType.MAP,
+                FrameType.GEO_SENSOR,
             },
         }
         if frame.frame_type not in allowed.get(tier, set()):
@@ -139,6 +142,38 @@ class DeviceMessageProcessor:
                 {"sensor": sensor, "value": value, "unit": unit},
                 frame.sequence,
                 now,
+            )
+            await self._locate_scalar(topic.device_id, device=None, frame=frame, now=now)
+        elif frame.frame_type is FrameType.GEO_SENSOR:
+            sensor, value, unit, latitude, longitude, altitude = frame.fields
+            await self._telemetry(
+                topic.device_id,
+                tier,
+                "sensor",
+                {
+                    "sensor": sensor,
+                    "value": value,
+                    "unit": unit,
+                    "latitude_e7": int(latitude),
+                    "longitude_e7": int(longitude),
+                    "altitude_mm": None if altitude == "na" else int(altitude),
+                },
+                frame.sequence,
+                now,
+            )
+            device = await self.redis.hgetall(device_key(topic.device_id))
+            await record_observation(
+                self.redis,
+                device_id=topic.device_id,
+                vehicle_id=device.get("vehicle_id"),
+                sensor=sensor,
+                value=value,
+                unit=unit,
+                latitude_e7=int(latitude),
+                longitude_e7=int(longitude),
+                altitude_mm=None if altitude == "na" else int(altitude),
+                observed_at=now,
+                location_source="explicit",
             )
         elif frame.frame_type is FrameType.DRONE_SNAPSHOT:
             names = (
@@ -271,6 +306,44 @@ class DeviceMessageProcessor:
             record,
             maxlen=100_000,
             approximate=True,
+        )
+
+    async def _locate_scalar(
+        self, device_id: str, device: dict[str, str] | None, frame: Frame, now: float
+    ) -> None:
+        device = device or await self.redis.hgetall(device_key(device_id))
+        if not isinstance(device, dict):
+            return
+        latitude = device.get("fixed_latitude_e7")
+        longitude = device.get("fixed_longitude_e7")
+        altitude = device.get("fixed_altitude_mm")
+        source = "fixed"
+        if latitude is None or longitude is None:
+            vehicle_id = device.get("vehicle_id")
+            if not vehicle_id:
+                return
+            vehicle = await self.redis.hgetall(f"vehicle:{vehicle_id}")
+            if not vehicle or now - float(vehicle.get("received_at", "0")) > 5:
+                return
+            latitude = vehicle.get("latitude_e7")
+            longitude = vehicle.get("longitude_e7")
+            altitude = vehicle.get("altitude_mm")
+            source = "vehicle"
+        if not latitude or not longitude or latitude == "null" or longitude == "null":
+            return
+        sensor, value, unit = frame.fields
+        await record_observation(
+            self.redis,
+            device_id=device_id,
+            vehicle_id=device.get("vehicle_id"),
+            sensor=sensor,
+            value=value,
+            unit=unit,
+            latitude_e7=int(latitude),
+            longitude_e7=int(longitude),
+            altitude_mm=int(altitude) if altitude and altitude != "null" else None,
+            observed_at=now,
+            location_source=source,
         )
 
     async def _vehicle(self, device_id: str, frame: Frame, now: float) -> None:

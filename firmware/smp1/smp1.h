@@ -9,7 +9,7 @@
 #endif
 
 #ifndef SMP1_MAX_FIELDS
-#define SMP1_MAX_FIELDS 4u
+#define SMP1_MAX_FIELDS 6u
 #endif
 #define SMP1_MAX_DEVICE_ID 64u
 
@@ -25,7 +25,8 @@ typedef enum {
     SMP1_MINIMAL_STATUS = 'M',
     SMP1_EVENT = 'V',
     SMP1_VEHICLE = 'B',
-    SMP1_MAP = 'P'
+    SMP1_MAP = 'P',
+    SMP1_GEO_SENSOR = 'G'
 } smp1_type_t;
 
 typedef struct {

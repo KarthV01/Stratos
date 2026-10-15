@@ -8,6 +8,7 @@ from app.mqtt_protocol import (
     encode_ack,
     encode_command,
     encode_hello,
+    encode_geospatial_sensor,
     encode_map_snapshot,
     encode_telemetry,
     encode_vehicle,
@@ -36,6 +37,17 @@ class MqttTopicTests(unittest.TestCase):
 
 
 class MqttFrameTests(unittest.TestCase):
+    def test_geospatial_sensor_is_atomic_and_validated(self) -> None:
+        payload = encode_geospatial_sensor(
+            14, "temperature", "21.5", "C", 407128001, -740060002, 12500
+        )
+        frame = decode_frame(payload)
+        self.assertEqual(FrameType.GEO_SENSOR, frame.frame_type)
+        self.assertEqual("407128001", frame.fields[3])
+        self.assertLess(len(payload), 128)
+        with self.assertRaises(ValueError):
+            encode_geospatial_sensor(15, "temperature", 21, "C", 900000001, 0)
+
     def test_tier_three_hello_is_compact(self) -> None:
         payload = encode_hello(1, "arduino-uno-r4-wifi", "1.0.0", 3, "base")
         frame = decode_frame(payload)

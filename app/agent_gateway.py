@@ -30,6 +30,7 @@ from app.tier_payloads import (
     FullTelemetry,
     encode_full_payload,
 )
+from app.geospatial import record_observation
 
 
 router = APIRouter(prefix="/api/agent/v1", tags=["full-agent"])
@@ -155,6 +156,26 @@ async def ingest_full_telemetry(
         mapping={"last_seen": str(now), "last_sequence": str(payload.sequence)},
     )
     await redis.zadd(DEVICE_INDEX, {agent_id: now})
+    if (
+        payload.sensors
+        and payload.flight.latitude_e7 is not None
+        and payload.flight.longitude_e7 is not None
+    ):
+        for sensor, value in payload.sensors.items():
+            await record_observation(
+                redis,
+                device_id=agent_id,
+                vehicle_id=record.get("vehicle_id"),
+                sensor=sensor,
+                value=value,
+                unit="unitless",
+                latitude_e7=payload.flight.latitude_e7,
+                longitude_e7=payload.flight.longitude_e7,
+                altitude_mm=payload.flight.relative_altitude_mm,
+                observed_at=payload.sent_at_ms / 1000,
+                location_source="telemetry",
+                observation_id=f"{record['boot_id']}:{payload.sequence}:{sensor}",
+            )
     return {"accepted": True, "duplicate": False, "sequence": payload.sequence}
 
 

@@ -138,7 +138,7 @@ func (b *Bridge) Process(ctx context.Context, topicValue string, payload []byte)
 		b.error(topic.DeviceID, f.Sequence, "frame-too-large", "tier-3-limit")
 		return nil
 	}
-	allowed := map[int]map[string]bool{2: {"T": true, "S": true, "A": true, "D": true, "V": true, "B": true, "P": true}, 3: {"T": true, "S": true, "A": true, "M": true, "B": true, "P": true}}
+	allowed := map[int]map[string]bool{2: {"T": true, "G": true, "S": true, "A": true, "D": true, "V": true, "B": true, "P": true}, 3: {"T": true, "G": true, "S": true, "A": true, "M": true, "B": true, "P": true}}
 	if !allowed[tier][f.Type] {
 		b.error(topic.DeviceID, f.Sequence, "tier-frame", "not-allowed")
 		return nil
@@ -156,7 +156,19 @@ func (b *Bridge) Process(ctx context.Context, topicValue string, payload []byte)
 	b.Redis.ZAdd(ctx, "device-index", redis.Z{Score: float64(now.UnixNano()) / 1e9, Member: topic.DeviceID})
 	switch f.Type {
 	case "T":
-		return b.telemetry(ctx, topic.DeviceID, tier, "sensor", map[string]any{"sensor": f.Fields[0], "value": f.Fields[1], "unit": f.Fields[2]}, f.Sequence, now)
+		if err = b.telemetry(ctx, topic.DeviceID, tier, "sensor", map[string]any{"sensor": f.Fields[0], "value": f.Fields[1], "unit": f.Fields[2]}, f.Sequence, now); err != nil {
+			return err
+		}
+		return b.locateScalar(ctx, topic.DeviceID, device, f, now)
+	case "G":
+		altitude := any(nil)
+		if f.Fields[5] != "na" {
+			altitude = atoi(f.Fields[5])
+		}
+		if err = b.telemetry(ctx, topic.DeviceID, tier, "sensor", map[string]any{"sensor": f.Fields[0], "value": f.Fields[1], "unit": f.Fields[2], "latitude_e7": atoi(f.Fields[3]), "longitude_e7": atoi(f.Fields[4]), "altitude_mm": altitude}, f.Sequence, now); err != nil {
+			return err
+		}
+		return b.observation(ctx, topic.DeviceID, device["vehicle_id"], f.Fields[0], f.Fields[1], f.Fields[2], atoi(f.Fields[3]), atoi(f.Fields[4]), altitude, "explicit", f.Sequence, now)
 	case "D":
 		names := []string{"uptime_ms", "latitude_e7", "longitude_e7", "relative_altitude_mm", "velocity_north_cms", "velocity_east_cms", "velocity_down_cms", "heading_cdeg", "voltage_mv", "remaining_pct", "flags"}
 		v := map[string]any{}
@@ -225,6 +237,47 @@ func (b *Bridge) telemetry(ctx context.Context, id string, tier int, kind string
 	_, err := p.Exec(ctx)
 	return err
 }
+func (b *Bridge) locateScalar(ctx context.Context, id string, device map[string]string, f Frame, now time.Time) error {
+	if lat := device["fixed_latitude_e7"]; lat != "" && device["fixed_longitude_e7"] != "" {
+		altitude := any(nil)
+		if device["fixed_altitude_mm"] != "" {
+			altitude = atoi(device["fixed_altitude_mm"])
+		}
+		return b.observation(ctx, id, device["vehicle_id"], f.Fields[0], f.Fields[1], f.Fields[2], atoi(lat), atoi(device["fixed_longitude_e7"]), altitude, "fixed", f.Sequence, now)
+	}
+	vehicle := device["vehicle_id"]
+	if vehicle == "" {
+		return nil
+	}
+	v, err := b.Redis.HGetAll(ctx, "vehicle:"+vehicle).Result()
+	if err != nil || v["latitude_e7"] == "" || v["longitude_e7"] == "" {
+		return err
+	}
+	received, _ := strconv.ParseFloat(v["received_at"], 64)
+	if float64(now.UnixNano())/1e9-received > 5 {
+		return nil
+	}
+	altitude := any(nil)
+	if v["altitude_mm"] != "" && v["altitude_mm"] != "null" {
+		altitude = atoi(v["altitude_mm"])
+	}
+	return b.observation(ctx, id, vehicle, f.Fields[0], f.Fields[1], f.Fields[2], atoi(v["latitude_e7"]), atoi(v["longitude_e7"]), altitude, "vehicle", f.Sequence, now)
+}
+func (b *Bridge) observation(ctx context.Context, id, vehicle, sensor, value, unit string, lat, lon int, altitude any, source string, seq uint32, now time.Time) error {
+	observationID := fmt.Sprintf("%s:%d:%d", id, seq, now.UnixNano())
+	var vehicleValue any
+	if vehicle != "" {
+		vehicleValue = vehicle
+	}
+	record := map[string]any{"schema": "stratos.observation/1", "id": observationID, "device_id": id, "vehicle_id": vehicleValue, "sensor": sensor, "value": parseFloat(value), "unit": unit, "observed_at": float64(now.UnixNano()) / 1e9, "latitude_e7": lat, "longitude_e7": lon, "altitude_mm": altitude, "location_source": source}
+	payload, _ := json.Marshal(record)
+	p := b.Redis.TxPipeline()
+	p.HSet(ctx, "observation:"+observationID, "payload", string(payload))
+	p.ZAdd(ctx, "observation-index", redis.Z{Score: float64(now.UnixNano()) / 1e9, Member: observationID})
+	p.XAdd(ctx, &redis.XAddArgs{Stream: "observations", MaxLen: 100000, Approx: true, Values: map[string]any{"observation_id": observationID, "payload": string(payload)}})
+	_, err := p.Exec(ctx)
+	return err
+}
 func (b *Bridge) event(ctx context.Context, id, kind, name, value, detail string, now time.Time) error {
 	return b.Redis.XAdd(ctx, &redis.XAddArgs{Stream: "device-events", MaxLen: 10000, Approx: true, Values: map[string]any{"device_id": id, "kind": kind, "name": name, "value": value, "detail": detail, "recorded_at": seconds(now)}}).Err()
 }
@@ -281,7 +334,7 @@ func (b *Bridge) mapSnapshot(ctx context.Context, id string, d map[string]string
 	encoded, _ := json.Marshal(snapshot)
 	lat, lon := nullable(f.Fields[1]), nullable(f.Fields[2])
 	p := b.Redis.TxPipeline()
-	p.HSet(ctx, "vehicle:"+vehicle, map[string]any{"vehicle_id": vehicle, "device_id": id, "schema": "flight/1", "received_at": seconds(now), "connected": map[bool]string{true: "1", false: "0"}[flags&32 != 0], "session_id": f.Fields[11], "system_id": d["mav_system_id"], "component_id": d["mav_component_id"], "autopilot": d["mav_autopilot"], "vehicle_type": d["mav_vehicle_type"], "snapshot": string(encoded)})
+	p.HSet(ctx, "vehicle:"+vehicle, map[string]any{"vehicle_id": vehicle, "device_id": id, "schema": "flight/1", "received_at": seconds(now), "connected": map[bool]string{true: "1", false: "0"}[flags&32 != 0], "session_id": f.Fields[11], "system_id": d["mav_system_id"], "component_id": d["mav_component_id"], "autopilot": d["mav_autopilot"], "vehicle_type": d["mav_vehicle_type"], "latitude_e7": nullString(f.Fields[1]), "longitude_e7": nullString(f.Fields[2]), "altitude_mm": nullString(f.Fields[4]), "snapshot": string(encoded)})
 	p.ZAdd(ctx, "vehicle-index", redis.Z{Score: float64(now.UnixNano()) / 1e9, Member: vehicle})
 	if lat != nil && lon != nil {
 		p.XAdd(ctx, &redis.XAddArgs{Stream: "vehicle-track:" + vehicle, MaxLen: 10000, Approx: true, Values: map[string]any{"received_at": seconds(now), "boot_ms": nullString(f.Fields[0]), "latitude_e7": f.Fields[1], "longitude_e7": f.Fields[2], "altitude_msl_mm": nullString(f.Fields[3]), "relative_altitude_mm": nullString(f.Fields[4]), "ground_speed_cms": nullString(f.Fields[5]), "heading_cdeg": nullString(f.Fields[6])}})
@@ -290,8 +343,9 @@ func (b *Bridge) mapSnapshot(ctx context.Context, id string, d map[string]string
 	_, err := p.Exec(ctx)
 	return err
 }
-func atoi(v string) int          { n, _ := strconv.Atoi(v); return n }
-func seconds(t time.Time) string { return strconv.FormatFloat(float64(t.UnixNano())/1e9, 'f', -1, 64) }
+func atoi(v string) int           { n, _ := strconv.Atoi(v); return n }
+func parseFloat(v string) float64 { n, _ := strconv.ParseFloat(v, 64); return n }
+func seconds(t time.Time) string  { return strconv.FormatFloat(float64(t.UnixNano())/1e9, 'f', -1, 64) }
 func contains(s, sub string) bool {
 	return len(sub) == 0 || len(s) >= len(sub) && func() bool {
 		for i := 0; i+len(sub) <= len(s); i++ {

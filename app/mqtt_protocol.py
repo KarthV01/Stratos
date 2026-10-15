@@ -27,6 +27,7 @@ class FrameType(str, Enum):
     EVENT = "V"
     VEHICLE = "B"
     MAP = "P"
+    GEO_SENSOR = "G"
 
 
 UPLINK_CHANNELS = frozenset({"hello", "telemetry", "state", "event", "ack"})
@@ -46,6 +47,7 @@ FRAME_CHANNELS = {
     FrameType.EVENT: "event",
     FrameType.VEHICLE: "state",
     FrameType.MAP: "telemetry",
+    FrameType.GEO_SENSOR: "telemetry",
 }
 
 _TOKEN = re.compile(
@@ -156,6 +158,7 @@ def _validate_shape(frame_type: FrameType, fields: tuple[str, ...]) -> None:
         FrameType.EVENT: 3,
         FrameType.VEHICLE: 6,
         FrameType.MAP: 12,
+        FrameType.GEO_SENSOR: 6,
     }[frame_type]
     if len(fields) != expected:
         raise ValueError(f"{frame_type.name} frame requires {expected} fields")
@@ -216,6 +219,15 @@ def _validate_shape(frame_type: FrameType, fields: tuple[str, ...]) -> None:
             raise ValueError("MAP flags must be an unsigned integer")
         if not _INTEGER.fullmatch(fields[11]) or int(fields[11]) < 1:
             raise ValueError("MAP session ID must be a positive integer")
+    if frame_type is FrameType.GEO_SENSOR:
+        if not _NUMBER.fullmatch(fields[1]):
+            raise ValueError("GEO_SENSOR value must be a decimal number")
+        if not _INTEGER.fullmatch(fields[3]) or not -900_000_000 <= int(fields[3]) <= 900_000_000:
+            raise ValueError("GEO_SENSOR latitude is out of range")
+        if not _INTEGER.fullmatch(fields[4]) or not -1_800_000_000 <= int(fields[4]) <= 1_800_000_000:
+            raise ValueError("GEO_SENSOR longitude is out of range")
+        if fields[5] != "na" and not _INTEGER.fullmatch(fields[5]):
+            raise ValueError("GEO_SENSOR altitude must be an integer or na")
 
 
 def ensure_topic_matches_frame(topic: Topic, frame: Frame) -> None:
@@ -240,6 +252,29 @@ def encode_telemetry(
     if not _NUMBER.fullmatch(number):
         raise ValueError("Telemetry value must be a decimal number")
     return encode_frame(FrameType.TELEMETRY, sequence, sensor, number, unit)
+
+
+def encode_geospatial_sensor(
+    sequence: int,
+    sensor: str,
+    value: int | float | str,
+    unit: str,
+    latitude_e7: int,
+    longitude_e7: int,
+    altitude_mm: int | None = None,
+) -> bytes:
+    payload = encode_frame(
+        FrameType.GEO_SENSOR,
+        sequence,
+        sensor,
+        str(value),
+        unit,
+        str(latitude_e7),
+        str(longitude_e7),
+        "na" if altitude_mm is None else str(altitude_mm),
+    )
+    decode_frame(payload)
+    return payload
 
 
 def encode_state(sequence: int, key: str, value: str) -> bytes:

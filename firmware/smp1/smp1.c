@@ -49,6 +49,7 @@ static int expected_fields(smp1_type_t type) {
         case SMP1_EVENT: return 3;
         case SMP1_VEHICLE: return 6;
         case SMP1_MAP: return 12;
+        case SMP1_GEO_SENSOR: return 6;
         default: return -1;
     }
 }

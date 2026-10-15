@@ -19,8 +19,8 @@ type Frame struct {
 	Fields   []string
 }
 
-var channels = map[string]string{"H": "hello", "T": "telemetry", "S": "state", "A": "ack", "W": "welcome", "C": "command", "E": "error", "D": "telemetry", "M": "telemetry", "V": "event", "B": "state", "P": "telemetry"}
-var shapes = map[string]int{"H": 4, "T": 3, "S": 2, "A": 3, "W": 2, "C": 3, "E": 2, "D": 11, "M": 3, "V": 3, "B": 6, "P": 12}
+var channels = map[string]string{"H": "hello", "T": "telemetry", "S": "state", "A": "ack", "W": "welcome", "C": "command", "E": "error", "D": "telemetry", "M": "telemetry", "V": "event", "B": "state", "P": "telemetry", "G": "telemetry"}
+var shapes = map[string]int{"H": 4, "T": 3, "S": 2, "A": 3, "W": 2, "C": 3, "E": 2, "D": 11, "M": 3, "V": 3, "B": 6, "P": 12, "G": 6}
 
 func ParseTopic(v string) (Topic, error) {
 	p := strings.Split(v, "/")
@@ -84,6 +84,24 @@ func validate(f Frame) error {
 			n, e := strconv.Atoi(v)
 			if e != nil || n < 0 || n > 100 {
 				return fmt.Errorf("invalid percentage")
+			}
+		}
+	}
+	if f.Type == "G" {
+		if _, e := strconv.ParseFloat(f.Fields[1], 64); e != nil {
+			return fmt.Errorf("invalid geospatial sensor value")
+		}
+		lat, e1 := strconv.ParseInt(f.Fields[3], 10, 32)
+		lon, e2 := strconv.ParseInt(f.Fields[4], 10, 32)
+		if e1 != nil || lat < -900000000 || lat > 900000000 {
+			return fmt.Errorf("geospatial sensor latitude is out of range")
+		}
+		if e2 != nil || lon < -1800000000 || lon > 1800000000 {
+			return fmt.Errorf("geospatial sensor longitude is out of range")
+		}
+		if f.Fields[5] != "na" {
+			if _, e := strconv.ParseInt(f.Fields[5], 10, 32); e != nil {
+				return fmt.Errorf("invalid geospatial sensor altitude")
 			}
 		}
 	}
