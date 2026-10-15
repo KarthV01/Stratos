@@ -2,6 +2,7 @@ package fullagent
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	gatewayv1 "github.com/KarthV01/Stratos/gateway/gen/stratos/gateway/v1"
@@ -12,6 +13,7 @@ type GatewaySession struct {
 	Transport      string
 	Session        *Session
 	Max, Available uint32
+	mu             sync.Mutex
 }
 
 func (s *GatewaySession) Open(ctx context.Context, m *gatewayv1.AgentMessage) (*gatewayv1.GatewayMessage, error) {
@@ -39,18 +41,25 @@ func (s *GatewaySession) Receive(ctx context.Context, m *gatewayv1.AgentMessage)
 		if err := s.Backend.Heartbeat(ctx, s.Session); err != nil {
 			return nil, err
 		}
+		s.mu.Lock()
 		s.Available = min(h.GetAvailableTaskSlots(), s.Max)
+		s.mu.Unlock()
 		return nil, nil
 	}
 	if r := m.GetTaskResult(); r != nil {
 		reply, err := s.Backend.Complete(ctx, s.Session, r)
+		s.mu.Lock()
 		s.Available = min(s.Available+1, s.Max)
+		s.mu.Unlock()
 		return reply, err
 	}
 	return nil, &Violation{"unexpected-message", "hello is only valid once"}
 }
 func (s *GatewaySession) Next(ctx context.Context) (*gatewayv1.GatewayMessage, error) {
-	if s.Available == 0 {
+	s.mu.Lock()
+	available := s.Available
+	s.mu.Unlock()
+	if available == 0 {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -60,7 +69,11 @@ func (s *GatewaySession) Next(ctx context.Context) (*gatewayv1.GatewayMessage, e
 	}
 	m, err := s.Backend.Next(ctx, s.Session)
 	if m != nil {
-		s.Available--
+		s.mu.Lock()
+		if s.Available > 0 {
+			s.Available--
+		}
+		s.mu.Unlock()
 	}
 	return m, err
 }

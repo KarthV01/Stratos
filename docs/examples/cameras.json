@@ -1,0 +1,13 @@
+{
+  "cameras": [
+    {
+      "camera_id": "mapping",
+      "vehicle_id": "survey-drone-01",
+      "input": "v4l2",
+      "uri": "/dev/video0",
+      "width": 1920,
+      "height": 1080,
+      "frame_rate": 30
+    }
+  ]
+}
